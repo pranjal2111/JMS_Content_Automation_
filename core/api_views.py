@@ -358,6 +358,28 @@ class PublishPostView(views.APIView):
         try:
             images_to_post = post.media_urls if post.media_urls else post.media_url
             
+            def make_public_url(url):
+                if not url: return url
+                if url.startswith('http'): return url
+                
+                abs_url = request.build_absolute_uri(url)
+                
+                # Meta cannot download from localhost. Try to construct the dev tunnel URL for port 8000.
+                if '127.0.0.1' in abs_url or 'localhost' in abs_url:
+                    import os
+                    redirect_uri = os.environ.get('META_REDIRECT_URI', '')
+                    if 'devtunnels.ms' in redirect_uri:
+                        from urllib.parse import urlparse
+                        host = urlparse(redirect_uri).netloc
+                        host = host.replace('-5173.', '-8000.')
+                        return f"https://{host}{url}"
+                return abs_url
+                
+            if isinstance(images_to_post, list):
+                images_to_post = [make_public_url(img) for img in images_to_post]
+            else:
+                images_to_post = make_public_url(images_to_post)
+            
             if platform == 'facebook':
                 response_data = meta_service.publish_to_page(
                     page_id=connection.page_id,
