@@ -149,11 +149,15 @@ class GeneratePostView(views.APIView):
         try:
             content = ai_service.generate_post_content(prompt)
             
+            # Generate an accompanying image
+            image_url = ai_service.generate_image_for_post(content)
+            
             # Save the generated post to review
             post = GeneratedPost.objects.create(
                 business=business,
                 topic=topic,
                 generated_content=content,
+                media_url=image_url,
                 status='DRAFT'
             )
             

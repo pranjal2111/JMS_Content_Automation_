@@ -32,3 +32,58 @@ def generate_post_content(prompt: str) -> str:
     else:
         # Fallback to standard OpenAI if needed, or raise exception
         raise ValueError("Azure OpenAI configuration is missing or invalid.")
+
+def generate_image_for_post(prompt: str) -> str:
+    endpoint_url = os.environ.get("Endpoint")
+    api_key = os.environ.get("Secret_Key")
+    model_name = os.environ.get("Model", "gpt-image-2.5-flare")
+    
+    if not endpoint_url or not api_key:
+        return None
+        
+    try:
+        # Based on standard AzureOpenAI configuration for images
+        client = AzureOpenAI(
+            api_key=api_key,
+            api_version="2024-02-15-preview",
+            azure_endpoint=endpoint_url
+        )
+        
+        # Create an image generation prompt based on the content
+        image_prompt = f"Create a professional, high-quality image for a social media post with the following context: {prompt[:800]}"
+        
+        response = client.images.generate(
+            model=model_name,
+            prompt=image_prompt,
+            n=1,
+            size="1024x1024"
+        )
+        
+        if response.data and len(response.data) > 0:
+            img_data = response.data[0]
+            if getattr(img_data, 'url', None):
+                return img_data.url
+            elif getattr(img_data, 'b64_json', None):
+                import base64
+                import uuid
+                from django.conf import settings
+                
+                # Decode the base64 image
+                image_bytes = base64.b64decode(img_data.b64_json)
+                
+                # Create a filename and ensure directory exists
+                filename = f"generated_img_{uuid.uuid4().hex[:8]}.png"
+                save_dir = os.path.join(settings.MEDIA_ROOT, 'ai_images')
+                os.makedirs(save_dir, exist_ok=True)
+                
+                # Save the image to the media folder
+                filepath = os.path.join(save_dir, filename)
+                with open(filepath, 'wb') as f:
+                    f.write(image_bytes)
+                    
+                # Return the URL to access it via Django
+                return f"{settings.MEDIA_URL}ai_images/{filename}"
+    except Exception as e:
+        print(f"Image generation failed: {e}")
+        
+    return None
