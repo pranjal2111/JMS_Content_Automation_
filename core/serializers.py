@@ -53,4 +53,4 @@ class MetaConnectionSerializer(serializers.ModelSerializer):
 class GeneratedPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = GeneratedPost
-        fields = ['id', 'topic', 'generated_content', 'media_url', 'media_urls', 'status', 'created_at', 'published_at']
+        fields = ['id', 'topic', 'generated_content', 'media_url', 'media_urls', 'status', 'created_at', 'published_at', 'published_platform']

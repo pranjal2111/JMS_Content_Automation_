@@ -149,8 +149,16 @@ class GeneratePostView(views.APIView):
         try:
             content = ai_service.generate_post_content(prompt)
             
+            # Check if brand has uploaded a logo
+            logo_asset = BrandAsset.objects.filter(business=business, asset_type='LOGO').first()
+            logo_path = logo_asset.file.path if logo_asset and logo_asset.file else None
+            
             # Generate an accompanying image
-            image_url = ai_service.generate_image_for_post(content)
+            image_url = ai_service.generate_image_for_post(
+                content, 
+                brand_name=business.name if business else None, 
+                logo_path=logo_path
+            )
             
             # Save the generated post to review
             post = GeneratedPost.objects.create(
@@ -413,6 +421,7 @@ class PublishPostView(views.APIView):
                 return Response({"error": f"{platform.capitalize()} Error: {error_msg}"}, status=status.HTTP_400_BAD_REQUEST)
             
             post.status = 'PUBLISHED'
+            post.published_platform = platform
             post.save()
             
             return Response({

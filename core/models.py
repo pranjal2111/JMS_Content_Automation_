@@ -68,6 +68,7 @@ class GeneratedPost(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='DRAFT')
     created_at = models.DateTimeField(auto_now_add=True)
     published_at = models.DateTimeField(null=True, blank=True)
+    published_platform = models.CharField(max_length=50, blank=True, null=True)
 
 class AutoReplySettings(models.Model):
     business = models.OneToOneField(Business, on_delete=models.CASCADE, related_name='auto_reply_settings')
