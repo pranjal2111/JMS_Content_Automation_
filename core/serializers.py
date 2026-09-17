@@ -37,7 +37,8 @@ class RegisterSerializer(serializers.ModelSerializer):
 class BrandProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = BrandProfile
-        fields = ['id', 'target_audience', 'tone_of_voice', 'brand_guidelines', 'updated_at']
+        fields = ['id', 'target_audience', 'tone_of_voice', 'brand_guidelines']
+        fields = ['id', 'target_audience', 'tone_of_voice', 'brand_guidelines', 'website_url', 'company_description']
 
 class BrandAssetSerializer(serializers.ModelSerializer):
     class Meta:
@@ -52,4 +53,4 @@ class MetaConnectionSerializer(serializers.ModelSerializer):
 class GeneratedPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = GeneratedPost
-        fields = ['id', 'topic', 'generated_content', 'media_url', 'status', 'created_at', 'published_at']
+        fields = ['id', 'topic', 'generated_content', 'media_url', 'media_urls', 'status', 'created_at', 'published_at']

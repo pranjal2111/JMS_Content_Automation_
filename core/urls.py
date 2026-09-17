@@ -13,6 +13,8 @@ urlpatterns = [
     
     # API Knowledge Base
     path('api/knowledge-base/', api_views.BrandProfileView.as_view(), name='api_brand_profile'),
+    path('api/assets/', api_views.BrandAssetView.as_view(), name='api_brand_assets'),
+    path('api/assets/<int:pk>/', api_views.BrandAssetDetailView.as_view(), name='api_brand_asset_detail'),
     
     # API Dashboard (Stats & Posts)
     path('api/dashboard/stats/', api_views.DashboardStatsView.as_view(), name='api_dashboard_stats'),
@@ -26,4 +28,13 @@ urlpatterns = [
     path('api/meta/callback/', api_views.MetaCallbackAPIView.as_view(), name='api_meta_callback'),
     path('api/meta/status/', api_views.MetaStatusView.as_view(), name='api_meta_status'),
     path('api/meta/pages/', api_views.MetaPagesView.as_view(), name='api_meta_pages'),
+    path('api/meta/ad-accounts/', api_views.MetaAdAccountsView.as_view(), name='api_meta_ad_accounts'),
+    path('api/meta/auto-reply-settings/', api_views.AutoReplySettingsView.as_view(), name='api_auto_reply_settings'),
+    
+    # Meta Webhook (Public)
+    path('api/webhooks/meta/', api_views.MetaWebhookView.as_view(), name='api_meta_webhook'),
+    
+    # Ad Campaign creation
+    path('api/posts/<int:pk>/create-ad/', api_views.CreateAdView.as_view(), name='api_create_ad'),
+    path('api/ads/create-scratch/', api_views.CreateAdScratchView.as_view(), name='api_create_ad_scratch'),
 ]
