@@ -310,6 +310,12 @@ class MetaPagesView(views.APIView):
         except Exception:
             pass # Non-critical error
             
+        # Subscribe the app to the page for webhooks
+        try:
+            meta_service.subscribe_app_to_page(page_id, connection.access_token)
+        except Exception as e:
+            print(f"Failed to subscribe app to page: {str(e)}")
+            
         connection.save()
         return Response({"message": "Page successfully selected"})
 
@@ -578,7 +584,8 @@ class MetaWebhookView(views.APIView):
                                     settings = AutoReplySettings.objects.filter(business=connection.business, is_active=True).first()
                                     if settings and settings.reply_text:
                                         from . import meta_service
-                                        meta_service.send_comment_reply(comment_id, settings.reply_text, connection.access_token)
+                                        # Always use connection.page_id to fetch the Page Access Token, even for IG
+                                        meta_service.send_comment_reply(comment_id, settings.reply_text, connection.access_token, connection.page_id, is_ig_comment)
                                         
         return HttpResponse('EVENT_RECEIVED', status=200)
 

@@ -88,6 +88,24 @@ def fetch_user_ad_accounts(access_token):
 
 import json
 
+def subscribe_app_to_page(page_id, user_access_token):
+    """Subscribes the Meta App to the Page to receive Webhooks."""
+    # First get the page access token
+    token_url = f"{GRAPH_API_URL}/{page_id}"
+    token_params = {"fields": "access_token", "access_token": user_access_token}
+    token_res = requests.get(token_url, params=token_params).json()
+    
+    page_access_token = token_res.get("access_token", user_access_token)
+    
+    # Subscribe the app to the page for 'feed'
+    subscribe_url = f"{GRAPH_API_URL}/{page_id}/subscribed_apps"
+    payload = {
+        "subscribed_fields": "feed",
+        "access_token": page_access_token
+    }
+    response = requests.post(subscribe_url, data=payload)
+    return response.json()
+
 def publish_to_page(page_id, user_access_token, message, image_urls=None):
     """Publishes a text post, single image post, or multi-image carousel to a Facebook Page."""
     # First, get the correct page access token
@@ -168,12 +186,24 @@ def publish_to_instagram(ig_user_id, access_token, image_url, caption):
     response = requests.post(publish_url, data=publish_payload)
     return response.json()
 
-def send_comment_reply(comment_id, message, access_token):
+def send_comment_reply(comment_id, message, access_token, page_id=None, is_instagram=False):
     """Replies to a specific comment on Facebook or Instagram."""
-    url = f"{GRAPH_API_URL}/{comment_id}/replies"
+    # Fetch the page access token first (required for both FB and IG)
+    actual_token = access_token
+    if page_id:
+        token_url = f"{GRAPH_API_URL}/{page_id}"
+        token_params = {"fields": "access_token", "access_token": access_token}
+        token_response = requests.get(token_url, params=token_params).json()
+        if isinstance(token_response, dict) and "access_token" in token_response:
+            actual_token = token_response["access_token"]
+            
+    # Facebook uses /comments, Instagram uses /replies
+    endpoint = "replies" if is_instagram else "comments"
+    url = f"{GRAPH_API_URL}/{comment_id}/{endpoint}"
+    
     payload = {
         "message": message,
-        "access_token": access_token
+        "access_token": actual_token
     }
     response = requests.post(url, data=payload)
     return response.json()
