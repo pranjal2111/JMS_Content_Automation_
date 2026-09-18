@@ -75,6 +75,17 @@ class AutoReplySettings(models.Model):
     reply_text = models.TextField(help_text="The text to auto-reply to comments on Facebook and Instagram.", blank=True)
     is_active = models.BooleanField(default=False)
 
+class AutoReplyLog(models.Model):
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name='auto_reply_logs')
+    platform = models.CharField(max_length=50, help_text="facebook or instagram")
+    commenter_name = models.CharField(max_length=255, blank=True, null=True)
+    comment_text = models.TextField(blank=True, null=True)
+    reply_text = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
 class AdCampaign(models.Model):
     post = models.OneToOneField(GeneratedPost, on_delete=models.CASCADE, related_name='ad_campaign')
     meta_campaign_id = models.CharField(max_length=255, blank=True, null=True)

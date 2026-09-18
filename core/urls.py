@@ -34,6 +34,9 @@ urlpatterns = [
     # Meta Webhook (Public)
     path('api/webhooks/meta/', api_views.MetaWebhookView.as_view(), name='api_meta_webhook'),
     
+    # Auto Reply Logs
+    path('api/auto-reply-logs/', api_views.AutoReplyLogListView.as_view(), name='api_auto_reply_logs'),
+    
     # Ad Campaign creation
     path('api/posts/<int:pk>/create-ad/', api_views.CreateAdView.as_view(), name='api_create_ad'),
     path('api/ads/create-scratch/', api_views.CreateAdScratchView.as_view(), name='api_create_ad_scratch'),

@@ -585,7 +585,30 @@ class MetaWebhookView(views.APIView):
                                     if settings and settings.reply_text:
                                         from . import meta_service
                                         # Always use connection.page_id to fetch the Page Access Token, even for IG
-                                        meta_service.send_comment_reply(comment_id, settings.reply_text, connection.access_token, connection.page_id, is_ig_comment)
+                                        res = meta_service.send_comment_reply(comment_id, settings.reply_text, connection.access_token, connection.page_id, is_ig_comment)
+                                        
+                                        # Log the auto-reply
+                                        if not res.get("error"):
+                                            from .models import AutoReplyLog
+                                            
+                                            # Facebook uses 'name', Instagram uses 'username'
+                                            from_data = value.get("from", {})
+                                            commenter_name = from_data.get("username") if is_ig_comment else from_data.get("name")
+                                            if not commenter_name:
+                                                commenter_name = "Unknown"
+                                                
+                                            comment_text = value.get("message", "")
+                                            if not comment_text and is_ig_comment:
+                                                comment_text = value.get("text", "")
+                                            
+                                            platform = "instagram" if is_ig_comment else "facebook"
+                                            AutoReplyLog.objects.create(
+                                                business=connection.business,
+                                                platform=platform,
+                                                commenter_name=commenter_name,
+                                                comment_text=comment_text,
+                                                reply_text=settings.reply_text
+                                            )
                                         
         return HttpResponse('EVENT_RECEIVED', status=200)
 
@@ -665,3 +688,13 @@ class CreateAdScratchView(views.APIView):
             
         except Exception as e:
             return Response({"error": f"Ad creation failed: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+from .models import AutoReplyLog
+from .serializers import AutoReplyLogSerializer
+
+class AutoReplyLogListView(generics.ListAPIView):
+    permission_classes = (IsAuthenticated,)
+    serializer_class = AutoReplyLogSerializer
+
+    def get_queryset(self):
+        return AutoReplyLog.objects.filter(business=self.request.user.business)

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Business, BrandProfile, BrandAsset, MetaConnection, GeneratedPost
+from .models import User, Business, BrandProfile, BrandAsset, MetaConnection, GeneratedPost , AutoReplyLog
 
 class BusinessSerializer(serializers.ModelSerializer):
     class Meta:
@@ -54,3 +54,8 @@ class GeneratedPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = GeneratedPost
         fields = ['id', 'topic', 'generated_content', 'media_url', 'media_urls', 'status', 'created_at', 'published_at', 'published_platform']
+
+class AutoReplyLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AutoReplyLog
+        fields = ['id', 'platform', 'commenter_name', 'comment_text', 'reply_text', 'created_at']
