@@ -22,6 +22,7 @@ urlpatterns = [
     path('api/posts/<int:pk>/', api_views.PostDetailView.as_view(), name='api_post_detail'),
     path('api/posts/<int:pk>/publish/', api_views.PublishPostView.as_view(), name='api_post_publish'),
     path('api/generate/', api_views.GeneratePostView.as_view(), name='api_generate_post'),
+    path('api/posts/approve-schedule/', api_views.ApproveAndScheduleView.as_view(), name='api_approve_schedule_post'),
 
     # API Meta OAuth & Pages
     path('api/meta/auth-url/', api_views.GetMetaAuthUrlView.as_view(), name='api_meta_auth_url'),

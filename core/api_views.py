@@ -1,3 +1,5 @@
+import concurrent.futures
+import re
 from rest_framework import generics, status, views
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -103,78 +105,171 @@ class GeneratePostView(views.APIView):
     def post(self, request):
         topic = request.data.get('topic')
         custom_tone = request.data.get('tone')
-        if not topic:
-            return Response({'error': 'Topic is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        category = request.data.get('category')
+        fb_objective = request.data.get('fb_objective')
+        insta_objective = request.data.get('insta_objective')
         
         business = request.user.business
         profile = BrandProfile.objects.filter(business=business).first()
         
+        if not topic and profile and profile.topics:
+            topic = profile.topics
+            
+        if not topic:
+            return Response({'error': 'Topic is required. Configure it in Brand Setup or provide it directly.'}, status=status.HTTP_400_BAD_REQUEST)
+        
         # Build prompt using Brand Profile info
         brand_info = ""
+        liked_posts_info = ""
+        tone = custom_tone
         if profile:
-            tone = custom_tone if custom_tone else profile.tone_of_voice
+            if not tone:
+                tone = profile.tone_of_voice
+            if not category:
+                category = profile.default_category
+            if not fb_objective:
+                fb_objective = profile.default_fb_objective
+            if not insta_objective:
+                insta_objective = profile.default_insta_objective
+
             website_data = ""
             if profile.website_url:
                 website_data = extract_text_from_url(profile.website_url)
                 
-            # Get text from all uploaded PDF documents
             pdf_data = ""
             documents = BrandAsset.objects.filter(business=business, asset_type='DOCUMENT')
             for doc in documents:
                 if doc.file and doc.file.path.endswith('.pdf'):
                     pdf_data += extract_text_from_pdf(doc.file.path) + "\n\n"
+            
+            if profile.liked_posts:
+                liked_posts_info = f"\n\nCRITICAL: The user has previously approved these posts. Please analyze their style, formatting, and tone, and ensure your generated options strictly match this preferred style:\n{profile.liked_posts[-5000:]}\n"
                 
             brand_info = (
                 f"\nBrand Context:\n"
-                f"- Tone of Voice: {tone}\n"
+                f"- Tone of Voice: {tone or 'Professional'}\n"
                 f"- Target Audience: {profile.target_audience}\n"
                 f"- Brand Guidelines: {profile.brand_guidelines}\n"
-                f"- Company Description/Brochure: {profile.company_description}\n"
+                f"- Company Description: {profile.company_description}\n"
                 f"- Website Content: {website_data}\n"
-                f"- Uploaded Document/PDF Content: {pdf_data[:10000]}\n" # Limit to 10k chars
+                f"- Uploaded Document Content: {pdf_data[:10000]}\n"
+                f"{liked_posts_info}"
             )
         
+        category = category or 'General'
+        fb_objective = fb_objective or 'Awareness'
+        insta_objective = insta_objective or 'Brand Awareness'
+        
         prompt = (
-            f"Write a Facebook post about: {topic}.\n"
+            f"Write a social media post about: {topic}.\n"
+            f"Category of content: {category}.\n"
+            f"Facebook Objective: {fb_objective}.\n"
+            f"Instagram Objective: {insta_objective}.\n"
             f"{brand_info}\n"
             "Instructions:\n"
+            "- Generate EXACTLY 5 completely distinct variations of the post.\n"
+            "- Separate each variation with the exact string '---OPTION---' on a new line.\n"
             "- Write in the exact tone and adhere strictly to the brand guidelines provided.\n"
             "- Speak directly to the target audience naturally, sounding highly human and authentic, NOT like an AI.\n"
-            "- Avoid complex vocabulary, flowery language, or typical AI buzzwords. Keep it conversational and relatable.\n"
-            "- Do NOT start with typical AI openings (e.g., 'Hey everyone!', 'Are you looking for...', 'In today\\'s digital age').\n"
             "- Include 2-3 suitable emojis and a few relevant hashtags.\n"
-            "- REMEMBER: No markdown formatting, NO bullet points, and NO hyphens (-) for lists. Write in flowing paragraphs only.\n"
-            "- CRITICAL: Output ONLY the Facebook post. Do not output anything else."
+            "- CRITICAL: Output ONLY the 5 variations separated by '---OPTION---'. Do not include labels like 'Option 1:' or introductory text."
         )
         
         try:
-            content = ai_service.generate_post_content(prompt)
+            content_raw = ai_service.generate_post_content(prompt)
             
-            # Check if brand has uploaded a logo
+            # Split by delimiter
+            options = [opt.strip() for opt in content_raw.split('---OPTION---') if opt.strip()]
+            
+            # Fallback if AI didn't follow formatting
+            if len(options) < 2:
+                # Try splitting by "Option X:"
+                alt_options = re.split(r'Option \d+:', content_raw)
+                options = [opt.strip() for opt in alt_options if opt.strip()]
+            
+            if not options:
+                options = [content_raw]
+            
+            # Cap at 5
+            options = options[:5]
+            
+            # Generate unique images for each option concurrently
             logo_asset = BrandAsset.objects.filter(business=business, asset_type='LOGO').first()
             logo_path = logo_asset.file.path if logo_asset and logo_asset.file else None
             
-            # Generate an accompanying image
-            image_url = ai_service.generate_image_for_post(
-                content, 
-                brand_name=business.name if business else None, 
-                logo_path=logo_path
-            )
+            def gen_img(opt_text):
+                # Use the option text as the prompt context, truncated
+                return ai_service.generate_image_for_post(
+                    opt_text, 
+                    brand_name=business.name if business else None, 
+                    logo_path=logo_path
+                )
+                
+            media_urls = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                # Map the function over all 5 options
+                results = executor.map(gen_img, options)
+                media_urls = list(results)
             
-            # Save the generated post to review
-            post = GeneratedPost.objects.create(
-                business=business,
-                topic=topic,
-                generated_content=content,
-                media_url=image_url,
-                status='DRAFT'
-            )
-            
-            serializer = GeneratedPostSerializer(post)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response({
+                'topic': topic,
+                'category': category,
+                'fb_objective': fb_objective,
+                'insta_objective': insta_objective,
+                'options': options,
+                'media_urls': media_urls
+            }, status=status.HTTP_200_OK)
             
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class ApproveAndScheduleView(views.APIView):
+    permission_classes = (IsAuthenticated,)
+    
+    def post(self, request):
+        topic = request.data.get('topic')
+        category = request.data.get('category')
+        fb_objective = request.data.get('fb_objective')
+        insta_objective = request.data.get('insta_objective')
+        content = request.data.get('content')
+        media_url = request.data.get('media_url')
+        scheduled_at = request.data.get('scheduled_at')
+        published_platform = request.data.get('published_platform')
+        
+        if not content:
+            return Response({'error': 'Content is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        business = request.user.business
+        
+        # Save the approved post
+        post = GeneratedPost.objects.create(
+            business=business,
+            topic=topic,
+            category=category,
+            fb_objective=fb_objective,
+            insta_objective=insta_objective,
+            generated_content=content,
+            media_url=media_url,
+            status='APPROVED',
+            scheduled_at=scheduled_at,
+            published_platform=published_platform
+        )
+        
+        # Add to liked_posts in BrandProfile for AI learning
+        profile, _ = BrandProfile.objects.get_or_create(business=business)
+        
+        separator = "\n\n---APPROVED POST---\n\n"
+        if profile.liked_posts:
+            profile.liked_posts += f"{separator}{content}"
+        else:
+            profile.liked_posts = content
+            
+        # Keep only the last 10000 characters to prevent overflow
+        profile.liked_posts = profile.liked_posts[-10000:]
+        profile.save()
+        
+        serializer = GeneratedPostSerializer(post)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 class PostListView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)
@@ -365,10 +460,6 @@ class PublishPostView(views.APIView):
         if not connection or not connection.access_token:
             return Response({"error": "Meta account not connected"}, status=status.HTTP_400_BAD_REQUEST)
             
-        if platform == 'facebook' and not connection.page_id:
-            return Response({"error": "No Facebook Page selected for publishing"}, status=status.HTTP_400_BAD_REQUEST)
-        elif platform == 'instagram' and not connection.instagram_id:
-            return Response({"error": "No Instagram account selected for publishing"}, status=status.HTTP_400_BAD_REQUEST)
             
         try:
             images_to_post = post.media_urls if post.media_urls else post.media_url
@@ -395,37 +486,45 @@ class PublishPostView(views.APIView):
             else:
                 images_to_post = make_public_url(images_to_post)
             
-            if platform == 'facebook':
-                response_data = meta_service.publish_to_page(
+            responses = []
+            if platform in ('facebook', 'both'):
+                if not connection.page_id:
+                    return Response({"error": "No Facebook Page selected for publishing"}, status=status.HTTP_400_BAD_REQUEST)
+                fb_res = meta_service.publish_to_page(
                     page_id=connection.page_id,
                     user_access_token=connection.access_token,
                     message=post.generated_content,
                     image_urls=images_to_post
                 )
-            else:
-                # Instagram requires an image
+                responses.append(fb_res)
+                
+            if platform in ('instagram', 'both'):
+                if not connection.instagram_id:
+                    return Response({"error": "No Instagram account selected for publishing"}, status=status.HTTP_400_BAD_REQUEST)
                 if not images_to_post:
                     return Response({"error": "Instagram requires an image. Text-only posts are not supported."}, status=status.HTTP_400_BAD_REQUEST)
-                    
-                # Instagram only supports single images for now in this flow
-                response_data = meta_service.publish_to_instagram(
+                
+                ig_res = meta_service.publish_to_instagram(
                     ig_user_id=connection.instagram_id,
                     access_token=connection.access_token,
                     image_url=images_to_post[0] if isinstance(images_to_post, list) else images_to_post,
                     caption=post.generated_content
                 )
-            
-            if isinstance(response_data, dict) and 'error' in response_data:
-                post.status = 'FAILED'
-                post.save()
+                responses.append(ig_res)
                 
-                # Facebook sometimes nests errors like {'error': {'error': {'message': '...'}}}
-                error_obj = response_data['error']
-                if isinstance(error_obj, dict) and 'error' in error_obj:
-                    error_obj = error_obj['error']
+            # If any request failed
+            for response_data in responses:
+                if isinstance(response_data, dict) and 'error' in response_data:
+                    post.status = 'FAILED'
+                    post.save()
                     
-                error_msg = error_obj.get('message', 'Unknown error') if isinstance(error_obj, dict) else str(error_obj)
-                return Response({"error": f"{platform.capitalize()} Error: {error_msg}"}, status=status.HTTP_400_BAD_REQUEST)
+                    # Facebook sometimes nests errors like {'error': {'error': {'message': '...'}}}
+                    error_obj = response_data['error']
+                    if isinstance(error_obj, dict) and 'error' in error_obj:
+                        error_obj = error_obj['error']
+                        
+                    error_msg = error_obj.get('message', 'Unknown error') if isinstance(error_obj, dict) else str(error_obj)
+                    return Response({"error": f"{platform.capitalize()} Error: {error_msg}"}, status=status.HTTP_400_BAD_REQUEST)
             
             post.status = 'PUBLISHED'
             post.published_platform = platform

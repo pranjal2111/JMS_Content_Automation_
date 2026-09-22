@@ -28,11 +28,13 @@ def generate_post_content(prompt: str) -> str:
             model=model_name,
             messages=[
                 {"role": "system", "content": (
-                    "You are an expert social media manager and copywriter. "
-                    "Write highly engaging, human-like Facebook posts. "
-                    "CRITICAL: Do NOT use any markdown formatting. Do NOT use bullet points, hyphens (-), or dashes for lists. Write in natural paragraphs. "
-                    "Do NOT sound like an AI. Keep the tone conversational, authentic, and natural. "
-                    "STRICT RULE: Output ONLY the raw post content. NEVER include conversational filler like 'Here is your post', 'Sure', or 'You're welcome!'. Start the post immediately."
+                    "You are a top-tier expert social media manager, creative director, and copywriter. "
+                    "Your goal is to write highly engaging, human-like social media posts that convert and drive engagement. "
+                    "When asked to generate multiple options, you must ensure they are highly diverse: use different hooks (questions, statements, statistics), vary the pacing, and try different emotional angles. "
+                    "CRITICAL: Do NOT use any markdown formatting. Do NOT use bullet points, hyphens (-), or dashes for lists. Write in natural flowing paragraphs. "
+                    "Do NOT sound like an AI. Completely avoid AI buzzwords like 'Unlock', 'Dive in', 'In today\\'s digital landscape', 'Elevate', or 'Discover'. Keep the tone conversational, authentic, and natural. "
+                    "STRICT RULE: If generating multiple options, you MUST separate each option strictly with the string '---OPTION---' on a new line. Do NOT output labels like 'Option 1' or 'Variation 2'. "
+                    "STRICT RULE: Output ONLY the raw post content. NEVER include conversational filler like 'Here are your posts', 'Sure', or 'You\\'re welcome!'. Start the first post immediately."
                 )},
                 {"role": "user", "content": prompt}
             ]
@@ -62,10 +64,13 @@ def generate_image_for_post(prompt: str, brand_name: str = None, logo_path: str 
         )
         
         # Create an image generation prompt based on the content
-        image_prompt = f"Create a professional, high-quality image for a social media post with the following context: {prompt[:800]}"
+        image_prompt = (
+            "Create a highly aesthetic, premium, and visually striking image suitable for a modern social media campaign. "
+            "Extract a very short, catchy 3-to-5 word hook or title from the following context and write it boldly and beautifully in the center of the image using modern typography. "
+            "DO NOT write the brand name anywhere in the image, as a logo will be overlaid later. "
+            f"Context of the post: {prompt[:800]}"
+        )
         
-        if brand_name:
-            image_prompt += f"\nMake sure the visual style aligns with the brand '{brand_name}'."
         # We don't ask DALL-E to generate a logo anymore since we are overlaying the real one!
             
         response = client.images.generate(
@@ -99,13 +104,22 @@ def generate_image_for_post(prompt: str, brand_name: str = None, logo_path: str 
                     # Open logo
                     logo_img = Image.open(logo_path).convert("RGBA")
                     
-                    # Resize logo (e.g., 20% of base image width)
-                    target_width = int(base_img.width * 0.20)
+                    # Target logo width: 15% of base image
+                    target_width = int(base_img.width * 0.15)
+                    
+                    # Get precise aspect ratio
                     aspect_ratio = logo_img.height / logo_img.width
                     target_height = int(target_width * aspect_ratio)
+                    
+                    # Resize with LANCZOS to avoid distortion
                     logo_img = logo_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
                     
-                    # Position: Top Right with 30px padding
+                    # Add a subtle drop shadow or padding behind logo?
+                    # Instead, if the logo doesn't have transparency, it looks like a block.
+                    # We will create a small semi-transparent pill/badge to put the logo on, so it looks deliberate.
+                    # But if the logo HAS transparency, the pill might look weird.
+                    # Let's just place it with 30px padding and ensure no distortion.
+                    
                     padding = 30
                     position = (base_img.width - target_width - padding, padding)
                     

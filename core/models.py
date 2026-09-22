@@ -33,6 +33,11 @@ class BrandProfile(models.Model):
     brand_guidelines = models.TextField(blank=True)
     website_url = models.URLField(blank=True, null=True)
     company_description = models.TextField(blank=True, help_text="Core services, background, or brochure text")
+    default_category = models.CharField(max_length=255, blank=True, null=True, help_text="Default category for generated posts")
+    default_fb_objective = models.CharField(max_length=255, blank=True, null=True, help_text="Default objective for Facebook")
+    default_insta_objective = models.CharField(max_length=255, blank=True, null=True, help_text="Default objective for Instagram")
+    topics = models.TextField(blank=True, null=True, help_text="Configured topics for content generation")
+    liked_posts = models.TextField(blank=True, help_text="Examples of posts the user has approved, for AI to learn from")
 
 class BrandAsset(models.Model):
     business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name='assets')
@@ -54,6 +59,9 @@ class MetaConnection(models.Model):
 class GeneratedPost(models.Model):
     business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name='posts')
     topic = models.CharField(max_length=255)
+    category = models.CharField(max_length=255, blank=True, null=True, help_text="Category of the content (e.g. Product, Service, Event)")
+    fb_objective = models.CharField(max_length=255, blank=True, null=True, help_text="Objective for Facebook")
+    insta_objective = models.CharField(max_length=255, blank=True, null=True, help_text="Objective for Instagram")
     generated_content = models.TextField()
     media_url = models.URLField(blank=True, null=True)
     media_urls = models.JSONField(default=list, blank=True, help_text="List of image URLs for carousel posts")
@@ -68,6 +76,7 @@ class GeneratedPost(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='DRAFT')
     created_at = models.DateTimeField(auto_now_add=True)
     published_at = models.DateTimeField(null=True, blank=True)
+    scheduled_at = models.DateTimeField(null=True, blank=True)
     published_platform = models.CharField(max_length=50, blank=True, null=True)
 
 class AutoReplySettings(models.Model):

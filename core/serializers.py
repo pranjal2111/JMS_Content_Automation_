@@ -37,8 +37,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 class BrandProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = BrandProfile
-        fields = ['id', 'target_audience', 'tone_of_voice', 'brand_guidelines']
-        fields = ['id', 'target_audience', 'tone_of_voice', 'brand_guidelines', 'website_url', 'company_description']
+        fields = ['id', 'tone_of_voice', 'target_audience', 'brand_guidelines', 'website_url', 'company_description', 'default_category', 'default_fb_objective', 'default_insta_objective', 'topics']
 
 class BrandAssetSerializer(serializers.ModelSerializer):
     class Meta:
@@ -53,7 +52,7 @@ class MetaConnectionSerializer(serializers.ModelSerializer):
 class GeneratedPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = GeneratedPost
-        fields = ['id', 'topic', 'generated_content', 'media_url', 'media_urls', 'status', 'created_at', 'published_at', 'published_platform']
+        fields = ['id', 'topic', 'category', 'fb_objective', 'insta_objective', 'generated_content', 'media_url', 'media_urls', 'status', 'created_at', 'published_at', 'published_platform']
 
 class AutoReplyLogSerializer(serializers.ModelSerializer):
     class Meta:
