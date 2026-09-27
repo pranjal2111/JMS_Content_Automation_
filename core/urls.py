@@ -31,12 +31,16 @@ urlpatterns = [
     path('api/meta/pages/', api_views.MetaPagesView.as_view(), name='api_meta_pages'),
     path('api/meta/ad-accounts/', api_views.MetaAdAccountsView.as_view(), name='api_meta_ad_accounts'),
     path('api/meta/auto-reply-settings/', api_views.AutoReplySettingsView.as_view(), name='api_auto_reply_settings'),
+    path('api/meta/post-details/<str:post_id>/', api_views.MetaPostDetailsView.as_view(), name='api_meta_post_details'),
     
     # Meta Webhook (Public)
     path('api/webhooks/meta/', api_views.MetaWebhookView.as_view(), name='api_meta_webhook'),
     
     # Auto Reply Logs
     path('api/auto-reply-logs/', api_views.AutoReplyLogListView.as_view(), name='api_auto_reply_logs'),
+    
+    # Auto DM Logs
+    path('api/auto-dm-logs/', api_views.AutoDMLogListView.as_view(), name='api_auto_dm_logs'),
     
     # Ad Campaign creation
     path('api/posts/<int:pk>/create-ad/', api_views.CreateAdView.as_view(), name='api_create_ad'),

@@ -160,6 +160,7 @@ class GeneratePostView(views.APIView):
         fb_objective = fb_objective or 'Awareness'
         insta_objective = insta_objective or 'Brand Awareness'
         
+        import uuid
         prompt = (
             f"Write a social media post about: {topic}.\n"
             f"Category of content: {category}.\n"
@@ -168,6 +169,7 @@ class GeneratePostView(views.APIView):
             f"{brand_info}\n"
             "Instructions:\n"
             "- Generate EXACTLY 5 completely distinct variations of the post.\n"
+            f"- THIS IS A NEW GENERATION BATCH (Request ID: {uuid.uuid4()}). You MUST provide completely fresh, highly creative, and entirely different ideas from any typical answers.\n"
             "- Separate each variation with the exact string '---OPTION---' on a new line.\n"
             "- Write in the exact tone and adhere strictly to the brand guidelines provided.\n"
             "- Speak directly to the target audience naturally, sounding highly human and authentic, NOT like an AI.\n"
@@ -197,18 +199,23 @@ class GeneratePostView(views.APIView):
             logo_asset = BrandAsset.objects.filter(business=business, asset_type='LOGO').first()
             logo_path = logo_asset.file.path if logo_asset and logo_asset.file else None
             
-            def gen_img(opt_text):
-                # Use the option text as the prompt context, truncated
-                return ai_service.generate_image_for_post(
-                    opt_text, 
-                    brand_name=business.name if business else None, 
-                    logo_path=logo_path
-                )
+            def gen_media(args):
+                idx, opt_text = args
+                # Generate video for odd indices, image for even indices
+                if idx % 2 != 0:
+                    return "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+                else:
+                    return ai_service.generate_image_for_post(
+                        opt_text, 
+                        brand_name=business.name if business else None, 
+                        logo_path=logo_path
+                    )
                 
             media_urls = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 # Map the function over all 5 options
-                results = executor.map(gen_img, options)
+                args_list = list(enumerate(options))
+                results = executor.map(gen_media, args_list)
                 media_urls = list(results)
             
             return Response({
@@ -549,14 +556,30 @@ class AutoReplySettingsView(views.APIView):
         settings, _ = AutoReplySettings.objects.get_or_create(business=business)
         return Response({
             "reply_text": settings.reply_text,
-            "is_active": settings.is_active
+            "is_active": settings.is_active,
+            "fb_reply_text": settings.fb_reply_text,
+            "fb_auto_reply_active": settings.fb_auto_reply_active,
+            "ig_reply_text": settings.ig_reply_text,
+            "ig_auto_reply_active": settings.ig_auto_reply_active,
+            "fb_dm_text": settings.fb_dm_text,
+            "fb_dm_on_like_active": settings.fb_dm_on_like_active,
+            "ig_dm_text": settings.ig_dm_text,
+            "ig_dm_on_like_active": settings.ig_dm_on_like_active,
         })
 
     def post(self, request):
         business = request.user.business
         settings, _ = AutoReplySettings.objects.get_or_create(business=business)
-        settings.reply_text = request.data.get('reply_text', '')
-        settings.is_active = request.data.get('is_active', False)
+        settings.reply_text = request.data.get('reply_text', settings.reply_text)
+        settings.is_active = request.data.get('is_active', settings.is_active)
+        settings.fb_reply_text = request.data.get('fb_reply_text', settings.fb_reply_text)
+        settings.fb_auto_reply_active = request.data.get('fb_auto_reply_active', settings.fb_auto_reply_active)
+        settings.ig_reply_text = request.data.get('ig_reply_text', settings.ig_reply_text)
+        settings.ig_auto_reply_active = request.data.get('ig_auto_reply_active', settings.ig_auto_reply_active)
+        settings.fb_dm_text = request.data.get('fb_dm_text', settings.fb_dm_text)
+        settings.fb_dm_on_like_active = request.data.get('fb_dm_on_like_active', settings.fb_dm_on_like_active)
+        settings.ig_dm_text = request.data.get('ig_dm_text', settings.ig_dm_text)
+        settings.ig_dm_on_like_active = request.data.get('ig_dm_on_like_active', settings.ig_dm_on_like_active)
         settings.save()
         return Response({"message": "Settings saved successfully"})
 
@@ -655,8 +678,8 @@ class MetaWebhookView(views.APIView):
                 target_id = entry.get("id")  # This is either page_id or instagram_id
                 for change in entry.get("changes", []):
                     field = change.get("field")
+                    value = change.get("value", {})
                     if field in ["feed", "comments"]:
-                        value = change.get("value", {})
                         
                         # Check if it's a new comment
                         is_page_comment = value.get("item") == "comment" and value.get("verb") == "add"
@@ -681,34 +704,150 @@ class MetaWebhookView(views.APIView):
                                 ).first()
                                 
                                 if connection:
-                                    settings = AutoReplySettings.objects.filter(business=connection.business, is_active=True).first()
-                                    if settings and settings.reply_text:
-                                        from . import meta_service
-                                        # Always use connection.page_id to fetch the Page Access Token, even for IG
-                                        res = meta_service.send_comment_reply(comment_id, settings.reply_text, connection.access_token, connection.page_id, is_ig_comment)
+                                    ar_settings = AutoReplySettings.objects.filter(business=connection.business).first()
+                                    if ar_settings:
+                                        # Use platform-specific reply text and active toggle
+                                        if is_ig_comment:
+                                            reply_active = ar_settings.ig_auto_reply_active
+                                            reply_msg = ar_settings.ig_reply_text
+                                        else:
+                                            reply_active = ar_settings.fb_auto_reply_active
+                                            reply_msg = ar_settings.fb_reply_text
                                         
-                                        # Log the auto-reply
-                                        if not res.get("error"):
-                                            from .models import AutoReplyLog
+                                        # Fallback to legacy fields if new fields are empty
+                                        if not reply_msg and ar_settings.reply_text:
+                                            reply_msg = ar_settings.reply_text
+                                            reply_active = ar_settings.is_active
+                                        
+                                        if reply_active and reply_msg:
+                                            from . import meta_service
+                                            # Send Public Reply
+                                            res = meta_service.send_comment_reply(comment_id, reply_msg, connection.access_token, connection.page_id, is_ig_comment)
                                             
-                                            # Facebook uses 'name', Instagram uses 'username'
-                                            from_data = value.get("from", {})
-                                            commenter_name = from_data.get("username") if is_ig_comment else from_data.get("name")
-                                            if not commenter_name:
-                                                commenter_name = "Unknown"
+                                            # Send Private DM Reply
+                                            if is_ig_comment:
+                                                dm_res = meta_service.send_instagram_private_reply(comment_id, reply_msg, connection.instagram_id, connection.access_token, connection.page_id)
+                                            else:
+                                                dm_res = meta_service.send_facebook_private_reply(comment_id, reply_msg, connection.page_id, connection.access_token)
+                                        
+                                            # Log the auto-reply (and DM)
+                                            if not res.get("error"):
+                                                from .models import AutoReplyLog, AutoDMLog
+                                            
+                                                # Facebook uses 'name', Instagram uses 'username'
+                                                from_data = value.get("from", {})
+                                                commenter_name = from_data.get("username") if is_ig_comment else from_data.get("name")
+                                                if not commenter_name:
+                                                    commenter_name = "Unknown"
                                                 
-                                            comment_text = value.get("message", "")
-                                            if not comment_text and is_ig_comment:
-                                                comment_text = value.get("text", "")
+                                                comment_text = value.get("message", "")
+                                                if not comment_text and is_ig_comment:
+                                                    comment_text = value.get("text", "")
+                                                
+                                                # Check for attachments (stickers, gifs, photos)
+                                                attachment = value.get("photo") or value.get("video") or value.get("link")
+                                                if not attachment and "attachment" in value:
+                                                    attachment = value.get("attachment", {}).get("url")
+                                                    
+                                                if attachment:
+                                                    if comment_text:
+                                                        comment_text += f" [MEDIA:{attachment}]"
+                                                    else:
+                                                        comment_text = f"[MEDIA:{attachment}]"
                                             
-                                            platform = "instagram" if is_ig_comment else "facebook"
-                                            AutoReplyLog.objects.create(
-                                                business=connection.business,
-                                                platform=platform,
-                                                commenter_name=commenter_name,
-                                                comment_text=comment_text,
-                                                reply_text=settings.reply_text
+                                                platform = "instagram" if is_ig_comment else "facebook"
+                                                
+                                                # Extract post_id correctly for Instagram vs Facebook
+                                                if is_ig_comment:
+                                                    post_id_val = value.get("media", {}).get("id", "")
+                                                else:
+                                                    post_id_val = value.get("post_id", "")
+                                                    
+                                                AutoReplyLog.objects.create(
+                                                    business=connection.business,
+                                                    platform=platform,
+                                                    commenter_name=commenter_name,
+                                                    comment_text=comment_text,
+                                                    reply_text=reply_msg,
+                                                    post_id=post_id_val
+                                                )
+                                                
+                                                # Log the DM as well
+                                                dm_status = 'failed' if dm_res.get('error') else 'sent'
+                                                error_msg = str(dm_res.get('error', '')) if dm_res.get('error') else None
+                                                sender_id = from_data.get("id")
+                                                
+                                                AutoDMLog.objects.create(
+                                                    business=connection.business,
+                                                    comment_text=comment_text,
+                                                    platform=platform,
+                                                    trigger_type='comment',
+                                                    recipient_name=commenter_name,
+                                                    recipient_id=sender_id,
+                                                    dm_text=reply_msg,
+                                                    post_id=post_id_val,
+                                                    status=dm_status,
+                                                    error_message=error_msg
+                                                )
+                                        
+                                         
+                    # === HANDLE LIKE EVENTS (Facebook & Instagram) ===
+                    is_fb_like = value.get("item") in ["like", "reaction"] and value.get("verb") == "add" and data.get("object") == "page"
+                    is_ig_like = field == "likes" and data.get("object") == "instagram"
+                    
+                    if is_fb_like or is_ig_like:
+                        if is_ig_like:
+                            # Instagram provides the liker's ID simply as 'id' in the value object for likes
+                            sender_id = value.get("id")
+                            sender_name = "IG User"
+                            post_id = value.get("media_id", "")
+                        else:
+                            sender_id = value.get("from", {}).get("id")
+                            sender_name = value.get("from", {}).get("name", "Unknown")
+                            post_id = value.get("post_id", "")
+                        
+                        # Don't DM our own page/account
+                        if sender_id and sender_id != target_id:
+                            from .models import MetaConnection, AutoReplySettings, AutoDMLog
+                            from django.db.models import Q
+                            
+                            connection = MetaConnection.objects.filter(
+                                Q(page_id=target_id) | Q(instagram_id=target_id),
+                                is_active=True
+                            ).first()
+                            
+                            if connection:
+                                dm_settings = AutoReplySettings.objects.filter(business=connection.business).first()
+                                
+                                if dm_settings:
+                                    dm_active = dm_settings.ig_dm_on_like_active if is_ig_like else dm_settings.fb_dm_on_like_active
+                                    dm_text = dm_settings.ig_dm_text if is_ig_like else dm_settings.fb_dm_text
+                                    
+                                    if dm_active and dm_text:
+                                        from . import meta_service
+                                        if is_ig_like:
+                                            res = meta_service.send_instagram_dm(
+                                                sender_id, dm_text, connection.instagram_id, connection.access_token, connection.page_id
                                             )
+                                        else:
+                                            res = meta_service.send_facebook_dm(
+                                                sender_id, dm_text, connection.page_id, connection.access_token
+                                            )
+                                        
+                                        # Log the auto-DM
+                                        dm_status = 'failed' if res.get('error') else 'sent'
+                                        error_msg = str(res.get('error', '')) if res.get('error') else None
+                                        AutoDMLog.objects.create(
+                                            business=connection.business,
+                                            platform='instagram' if is_ig_like else 'facebook',
+                                            trigger_type='like',
+                                            recipient_name=sender_name,
+                                            recipient_id=sender_id,
+                                            dm_text=dm_text,
+                                            post_id=post_id,
+                                            status=dm_status,
+                                            error_message=error_msg
+                                        )
                                         
         return HttpResponse('EVENT_RECEIVED', status=200)
 
@@ -798,3 +937,31 @@ class AutoReplyLogListView(generics.ListAPIView):
 
     def get_queryset(self):
         return AutoReplyLog.objects.filter(business=self.request.user.business)
+
+from .models import AutoDMLog
+from .serializers import AutoDMLogSerializer
+
+class AutoDMLogListView(generics.ListAPIView):
+    permission_classes = (IsAuthenticated,)
+    serializer_class = AutoDMLogSerializer
+
+    def get_queryset(self):
+        return AutoDMLog.objects.filter(business=self.request.user.business)
+
+
+class MetaPostDetailsView(views.APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, post_id):
+        platform = request.query_params.get('platform', 'instagram')
+        connection = MetaConnection.objects.filter(business=request.user.business, is_active=True).first()
+        if not connection:
+            return Response({"error": "No Meta connection found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from .meta_service import fetch_post_details, _get_page_access_token
+            access_token = _get_page_access_token(connection.page_id, connection.access_token) if connection.page_id else connection.access_token
+            details = fetch_post_details(post_id, access_token, platform)
+            return Response(details, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -15,7 +15,7 @@ def get_meta_app_credentials():
 def get_authorization_url():
     creds = get_meta_app_credentials()
     # Requesting scopes needed for publishing, instagram, messaging, and ads
-    scopes = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,instagram_manage_comments,ads_management,ads_read,pages_manage_metadata"
+    scopes = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,instagram_manage_comments,ads_management,ads_read,pages_manage_metadata,pages_messaging,instagram_manage_messages"
     
     url = f"https://www.facebook.com/{META_API_VERSION}/dialog/oauth"
     url += f"?client_id={creds['client_id']}"
@@ -87,6 +87,15 @@ def fetch_user_ad_accounts(access_token):
     return []
 
 import json
+
+def _get_page_access_token(page_id, user_access_token):
+    """Helper to fetch the Page Access Token from a User Access Token."""
+    token_url = f"{GRAPH_API_URL}/{page_id}"
+    token_params = {"fields": "access_token", "access_token": user_access_token}
+    token_response = requests.get(token_url, params=token_params).json()
+    if isinstance(token_response, dict) and "access_token" in token_response:
+        return token_response["access_token"]
+    return user_access_token
 
 def subscribe_app_to_page(page_id, user_access_token):
     """Subscribes the Meta App to the Page to receive Webhooks."""
@@ -303,3 +312,104 @@ def get_ad_insights(ad_id, access_token):
     }
     response = requests.get(url, params=params)
     return response.json()
+
+
+# ===== AUTO DM FUNCTIONS =====
+
+def send_facebook_dm(recipient_id, message_text, page_id, user_access_token):
+    """Sends a DM to a Facebook user via the Page's Conversations API."""
+    page_access_token = _get_page_access_token(page_id, user_access_token)
+    
+    url = f"{GRAPH_API_URL}/{page_id}/messages"
+    payload = {
+        "recipient": json.dumps({"id": recipient_id}),
+        "message": json.dumps({"text": message_text}),
+        "messaging_type": "UPDATE",
+        "access_token": page_access_token
+    }
+    response = requests.post(url, data=payload)
+    return response.json()
+
+
+def send_instagram_dm(recipient_id, message_text, ig_user_id, user_access_token, page_id):
+    """Sends a DM to an Instagram user via the Instagram Messaging API."""
+    page_access_token = _get_page_access_token(page_id, user_access_token)
+    
+    url = f"{GRAPH_API_URL}/{ig_user_id}/messages"
+    payload = {
+        "recipient": json.dumps({"id": recipient_id}),
+        "message": json.dumps({"text": message_text}),
+        "access_token": page_access_token
+    }
+    response = requests.post(url, data=payload)
+    return response.json()
+
+def send_facebook_private_reply(comment_id, message_text, page_id, user_access_token):
+    """Sends a private DM reply to a Facebook comment."""
+    page_access_token = _get_page_access_token(page_id, user_access_token)
+    
+    url = f"{GRAPH_API_URL}/{page_id}/messages"
+    payload = {
+        "recipient": json.dumps({"comment_id": comment_id}),
+        "message": json.dumps({"text": message_text}),
+        "messaging_type": "UPDATE",
+        "access_token": page_access_token
+    }
+    response = requests.post(url, data=payload)
+    return response.json()
+
+
+def send_instagram_private_reply(comment_id, message_text, ig_user_id, user_access_token, page_id):
+    """Sends a private DM reply to an Instagram comment."""
+    page_access_token = _get_page_access_token(page_id, user_access_token)
+    
+    url = f"{GRAPH_API_URL}/{page_id}/messages"
+    payload = {
+        "recipient": json.dumps({"comment_id": comment_id}),
+        "message": json.dumps({"text": message_text}),
+        "access_token": page_access_token
+    }
+    response = requests.post(url, data=payload)
+    return response.json()
+
+
+def fetch_recent_media(ig_user_id, access_token, limit=10):
+    """Fetches recent media (posts) from an Instagram Business account."""
+    url = f"{GRAPH_API_URL}/{ig_user_id}/media"
+    params = {
+        "fields": "id,caption,timestamp,like_count",
+        "limit": limit,
+        "access_token": access_token
+    }
+    response = requests.get(url, params=params)
+    return response.json()
+
+
+def fetch_media_likes(media_id, access_token):
+    """Fetches users who liked a specific Instagram media post."""
+    url = f"{GRAPH_API_URL}/{media_id}/likes"
+    params = {
+        "access_token": access_token
+    }
+    response = requests.get(url, params=params)
+    return response.json()
+
+
+def fetch_post_details(post_id, access_token, platform="instagram"):
+    """Fetches thumbnail and url for a specific post/media ID."""
+    if platform == "instagram":
+        url = f"{GRAPH_API_URL}/{post_id}"
+        params = {
+            "fields": "id,caption,media_url,thumbnail_url,permalink",
+            "access_token": access_token
+        }
+    else:
+        url = f"{GRAPH_API_URL}/{post_id}"
+        params = {
+            "fields": "id,message,full_picture,permalink_url",
+            "access_token": access_token
+        }
+    
+    response = requests.get(url, params=params)
+    return response.json()
+

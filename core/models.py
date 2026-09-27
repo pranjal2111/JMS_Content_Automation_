@@ -81,8 +81,21 @@ class GeneratedPost(models.Model):
 
 class AutoReplySettings(models.Model):
     business = models.OneToOneField(Business, on_delete=models.CASCADE, related_name='auto_reply_settings')
+    # Legacy fields (kept for backward compat)
     reply_text = models.TextField(help_text="The text to auto-reply to comments on Facebook and Instagram.", blank=True)
     is_active = models.BooleanField(default=False)
+    # Facebook: Auto-reply to comments
+    fb_reply_text = models.TextField(blank=True, help_text="Auto-reply text for Facebook comments")
+    fb_auto_reply_active = models.BooleanField(default=False, help_text="Enable auto-reply to Facebook comments")
+    # Instagram: Auto-reply to comments
+    ig_reply_text = models.TextField(blank=True, help_text="Auto-reply text for Instagram comments")
+    ig_auto_reply_active = models.BooleanField(default=False, help_text="Enable auto-reply to Instagram comments")
+    # Facebook: DM on post like
+    fb_dm_text = models.TextField(blank=True, help_text="DM text to send to users who like your Facebook posts")
+    fb_dm_on_like_active = models.BooleanField(default=False, help_text="Enable auto-DM when someone likes your Facebook post")
+    # Instagram: DM on post like
+    ig_dm_text = models.TextField(blank=True, help_text="DM text to send to users who like your Instagram posts")
+    ig_dm_on_like_active = models.BooleanField(default=False, help_text="Enable auto-DM when someone likes your Instagram post")
 
 class AutoReplyLog(models.Model):
     business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name='auto_reply_logs')
@@ -90,6 +103,23 @@ class AutoReplyLog(models.Model):
     commenter_name = models.CharField(max_length=255, blank=True, null=True)
     comment_text = models.TextField(blank=True, null=True)
     reply_text = models.TextField(blank=True, null=True)
+    post_id = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+class AutoDMLog(models.Model):
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name='auto_dm_logs')
+    platform = models.CharField(max_length=50, help_text="facebook or instagram")
+    trigger_type = models.CharField(max_length=50, default='like', help_text="What triggered the DM (e.g. like)")
+    comment_text = models.TextField(blank=True, null=True)
+    recipient_name = models.CharField(max_length=255, blank=True, null=True)
+    recipient_id = models.CharField(max_length=255, blank=True, null=True)
+    dm_text = models.TextField(blank=True, null=True)
+    post_id = models.CharField(max_length=255, blank=True, null=True)
+    status = models.CharField(max_length=50, default='sent', help_text="sent or failed")
+    error_message = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

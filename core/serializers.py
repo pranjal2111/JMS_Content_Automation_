@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Business, BrandProfile, BrandAsset, MetaConnection, GeneratedPost , AutoReplyLog
+from .models import User, Business, BrandProfile, BrandAsset, MetaConnection, GeneratedPost, AutoReplyLog, AutoDMLog
 
 class BusinessSerializer(serializers.ModelSerializer):
     class Meta:
@@ -52,9 +52,15 @@ class MetaConnectionSerializer(serializers.ModelSerializer):
 class GeneratedPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = GeneratedPost
-        fields = ['id', 'topic', 'category', 'fb_objective', 'insta_objective', 'generated_content', 'media_url', 'media_urls', 'status', 'created_at', 'published_at', 'published_platform']
+        fields = ['id', 'topic', 'category', 'fb_objective', 'insta_objective', 'generated_content', 'media_url', 'media_urls', 'status', 'created_at', 'scheduled_at', 'published_at', 'published_platform']
 
 class AutoReplyLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = AutoReplyLog
-        fields = ['id', 'platform', 'commenter_name', 'comment_text', 'reply_text', 'created_at']
+        fields = ['id', 'platform', 'commenter_name', 'comment_text', 'reply_text', 'post_id', 'created_at']
+
+class AutoDMLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AutoDMLog
+        fields = ['id', 'platform', 'trigger_type', 'recipient_name', 'recipient_id', 'comment_text', 'dm_text', 'post_id', 'status', 'error_message', 'created_at']
+
