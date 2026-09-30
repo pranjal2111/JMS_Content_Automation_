@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
-from .models import BrandProfile, GeneratedPost, MetaConnection, BrandAsset
+from .models import BrandProfile, GeneratedPost, MetaConnection, BrandAsset, AutoReplyLog, AutoDMLog, AdCampaign
 from .serializers import RegisterSerializer, BrandProfileSerializer, GeneratedPostSerializer
 from . import ai_service
 from . import meta_service
@@ -162,24 +162,32 @@ class GeneratePostView(views.APIView):
         
         import uuid
         prompt = (
-            f"Write a social media post about: {topic}.\n"
-            f"Category of content: {category}.\n"
-            f"Facebook Objective: {fb_objective}.\n"
-            f"Instagram Objective: {insta_objective}.\n"
-            f"{brand_info}\n"
-            "Instructions:\n"
-            "- Generate EXACTLY 5 completely distinct variations of the post.\n"
-            f"- THIS IS A NEW GENERATION BATCH (Request ID: {uuid.uuid4()}). You MUST provide completely fresh, highly creative, and entirely different ideas from any typical answers.\n"
-            "- Separate each variation with the exact string '---OPTION---' on a new line.\n"
-            "- Write in the exact tone and adhere strictly to the brand guidelines provided.\n"
-            "- Speak directly to the target audience naturally, sounding highly human and authentic, NOT like an AI.\n"
-            "- Include 2-3 suitable emojis and a few relevant hashtags.\n"
-            "- CRITICAL: Output ONLY the 5 variations separated by '---OPTION---'. Do not include labels like 'Option 1:' or introductory text."
+            "You are an expert social media strategist and world-class copywriter.\n"
+            f"Your task is to craft a highly engaging social media post about: '{topic}'.\n\n"
+            "=== STRATEGIC DIRECTION ===\n"
+            f"• Content Category: {category}\n"
+            f"• Facebook Objective: {fb_objective}\n"
+            f"• Instagram Objective: {insta_objective}\n"
+            f"{brand_info}\n\n"
+            "=== GENERATION INSTRUCTIONS ===\n"
+            "1. Generate EXACTLY 5 completely distinct, high-performing variations of the post.\n"
+            "2. Structure each post with a thumb-stopping hook, engaging body copy, and a clear Call-to-Action (CTA).\n"
+            "3. Ensure the copy sounds 100% human, authentic, and conversational. STRICTLY AVOID generic AI buzzwords (e.g., 'unlock', 'delve', 'elevate', 'supercharge').\n"
+            "4. Adapt the messaging to drive the specified Facebook and Instagram objectives effectively.\n"
+            "5. Maintain absolute adherence to the brand's tone of voice and guidelines.\n"
+            "6. Seamlessly integrate 2-4 well-placed emojis and 3-5 highly relevant hashtags.\n"
+            f"7. CRITICAL: THIS IS A NEW BATCH (ID: {uuid.uuid4()}). Provide fresh, highly creative angles that stand out from typical corporate posts.\n\n"
+            "=== OUTPUT FORMAT ===\n"
+            "- Separate each variation using EXACTLY the string '---OPTION---' on its own line.\n"
+            "- Do NOT include labels like 'Option 1:', introductory text, or closing remarks. ONLY output the post text."
         )
         
         try:
             content_raw = ai_service.generate_post_content(prompt)
             
+            if not content_raw:
+                raise ValueError("AI failed to generate content (possibly blocked by content filters).")
+
             # Split by delimiter
             options = [opt.strip() for opt in content_raw.split('---OPTION---') if opt.strip()]
             
@@ -203,7 +211,18 @@ class GeneratePostView(views.APIView):
                 idx, opt_text = args
                 # Generate video for odd indices, image for even indices
                 if idx % 2 != 0:
-                    return "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+                    try:
+                        video_url = ai_service.generate_video_with_gemini(opt_text)
+                        if video_url:
+                            return video_url
+                    except Exception as e:
+                        print(f"Video generation failed: {e}")
+                    # Fallback to image if video fails or returns None
+                    return ai_service.generate_image_for_post(
+                        opt_text, 
+                        brand_name=business.name if business else None, 
+                        logo_path=logo_path
+                    )
                 else:
                     return ai_service.generate_image_for_post(
                         opt_text, 
@@ -212,7 +231,7 @@ class GeneratePostView(views.APIView):
                     )
                 
             media_urls = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                 # Map the function over all 5 options
                 args_list = list(enumerate(options))
                 results = executor.map(gen_media, args_list)
@@ -431,6 +450,13 @@ class DashboardStatsView(views.APIView):
             return Response({"error": "User is not associated with any business."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             posts_generated = GeneratedPost.objects.filter(business=business).count()
+            published_posts = GeneratedPost.objects.filter(business=business, status='PUBLISHED').count()
+            scheduled_posts = GeneratedPost.objects.filter(business=business, scheduled_at__isnull=False).exclude(status='PUBLISHED').count()
+            
+            auto_replies_sent = AutoReplyLog.objects.filter(business=business).count()
+            auto_dms_sent = AutoDMLog.objects.filter(business=business, status='sent').count()
+            ad_campaigns_total = AdCampaign.objects.filter(post__business=business).count()
+            
             pages_connected = 0
             
             connection = MetaConnection.objects.filter(business=business, is_active=True).first()
@@ -438,8 +464,13 @@ class DashboardStatsView(views.APIView):
                 pages_connected = 1 if connection.page_id else 0 
                 
             return Response({
-                "pages_connected": pages_connected,
-                "posts_generated": posts_generated
+                "posts_generated": posts_generated,
+                "published_posts": published_posts,
+                "scheduled_posts": scheduled_posts,
+                "auto_replies_sent": auto_replies_sent,
+                "auto_dms_sent": auto_dms_sent,
+                "ad_campaigns_total": ad_campaigns_total,
+                "pages_connected": pages_connected
             })
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -27,11 +27,22 @@ def generate_post_content(prompt: str) -> str:
         response = client.chat.completions.create(
             model=model_name,
             messages=[
+                # {"role": "system", "content": (
+                #     "You are a top-tier expert social media manager, creative director, and copywriter. "
+                #     "Your goal is to write highly engaging, human-like social media posts that convert and drive engagement. "
+                #     "You will be provided with information from a brand setup and a PDF document. You MUST use all the relevant details and context provided in these documents to generate the content. "
+                #     "When asked to generate multiple options, you must ensure they are highly diverse: use different hooks (questions, statements, statistics), vary the pacing, and try different emotional angles. "
+                #     "CRITICAL: Do NOT use any markdown formatting. Do NOT use bullet points, hyphens (-), or dashes for lists. Write in natural flowing paragraphs. "
+                #     "Do NOT sound like an AI. Completely avoid AI buzzwords like 'Unlock', 'Dive in', 'In today\\'s digital landscape', 'Elevate', or 'Discover'. Keep the tone conversational, authentic, and natural. "
+                #     "STRICT RULE: If generating multiple options, you MUST separate each option strictly with the string '---OPTION---' on a new line. Do NOT output labels like 'Option 1' or 'Variation 2'. "
+                #     "STRICT RULE: Output ONLY the raw post content. NEVER include conversational filler like 'Here are your posts', 'Sure', or 'You\\'re welcome!'. Start the first post immediately."
+                # )},
                 {"role": "system", "content": (
-                    "You are a top-tier expert social media manager, creative director, and copywriter. "
-                    "Your goal is to write highly engaging, human-like social media posts that convert and drive engagement. "
+                    "You are a top-tier Direct-Response Copywriter and Social Media Operations Director. "
+                    "Your goal is to write highly engaging, human-like social media posts that convert, drive engagement, and are engineered for social media feeds. "
                     "You will be provided with information from a brand setup and a PDF document. You MUST use all the relevant details and context provided in these documents to generate the content. "
-                    "When asked to generate multiple options, you must ensure they are highly diverse: use different hooks (questions, statements, statistics), vary the pacing, and try different emotional angles. "
+                    "When asked to generate multiple options, you must ensure they are highly diverse by using pattern-interrupt hooks (e.g., 3-second curiosity-gap headlines), varying the pacing, and targeting specific emotional pain points. "
+                    "Ensure the content has clear transition lines into the main body. Maximize save-to-reach potential by delivering high-density value breakdowns. "
                     "CRITICAL: Do NOT use any markdown formatting. Do NOT use bullet points, hyphens (-), or dashes for lists. Write in natural flowing paragraphs. "
                     "Do NOT sound like an AI. Completely avoid AI buzzwords like 'Unlock', 'Dive in', 'In today\\'s digital landscape', 'Elevate', or 'Discover'. Keep the tone conversational, authentic, and natural. "
                     "STRICT RULE: If generating multiple options, you MUST separate each option strictly with the string '---OPTION---' on a new line. Do NOT output labels like 'Option 1' or 'Variation 2'. "
@@ -39,9 +50,9 @@ def generate_post_content(prompt: str) -> str:
                 )},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.9,
-            presence_penalty=0.6,
-            frequency_penalty=0.6
+            temperature=1.1,
+            presence_penalty=1.0,
+            frequency_penalty=1.0
         )
         return response.choices[0].message.content
     else:
@@ -68,93 +79,129 @@ def generate_image_for_post(prompt: str, brand_name: str = None, logo_path: str 
         )
         
         # Create an image generation prompt based on the content
+        import uuid
         image_prompt = (
             "Create a highly aesthetic, premium, and visually striking image suitable for a modern social media campaign. "
             "CRITICAL: There must be absolutely NO human faces or people in the image. The visuals must be strictly related to the core topic, objects, or abstract concepts from the context. "
             "Extract a very short, catchy 3-to-5 word hook or title from the following context and write it boldly and beautifully in the center of the image using modern typography. "
             "DO NOT write the brand name anywhere in the image, as a logo will be overlaid later. "
+            f"UNIQUE BATCH ID: {uuid.uuid4()} "
             f"Context of the post: {prompt[:800]}"
         )
         
-        # We don't ask DALL-E to generate a logo anymore since we are overlaying the real one!
-            
-        response = client.images.generate(
-            model=model_name,
-            prompt=image_prompt,
-            n=1,
-            size="1024x1024"
-        )
+        try:
+            response = client.images.generate(
+                model=model_name,
+                prompt=image_prompt,
+                n=1,
+                size="1024x1024"
+            )
+        except Exception as e:
+            # If rejected by safety filter, fallback to a completely neutral generic prompt
+            print(f"Initial image generation failed, retrying with safe fallback prompt. Error: {e}")
+            try:
+                fallback_prompt = (
+                    "Create a highly aesthetic, premium, and visually striking abstract gradient background suitable for a modern social media campaign. "
+                    "There must be absolutely NO human faces or people. Use beautiful calming colors."
+                )
+                response = client.images.generate(
+                    model=model_name,
+                    prompt=fallback_prompt,
+                    n=1,
+                    size="1024x1024"
+                )
+            except Exception as e2:
+                print(f"Fallback AI generation also failed: {e2}")
+                response = None
         
-        if response.data and len(response.data) > 0:
+        if response and response.data and len(response.data) > 0:
             img_data = response.data[0]
+        else:
+            # Guaranteed fallback using Pillow
+            img_data = None
             
-            # 1. Get raw image bytes
-            image_bytes = None
+        # 1. Get raw image bytes
+        image_bytes = None
+        if img_data:
             if getattr(img_data, 'b64_json', None):
                 image_bytes = base64.b64decode(img_data.b64_json)
             elif getattr(img_data, 'url', None):
                 resp = requests.get(img_data.url)
                 if resp.status_code == 200:
                     image_bytes = resp.content
+        
+        if not image_bytes:
+            # Generate a beautiful gradient fallback image using PIL
+            print("Generating fallback gradient image locally...")
+            import math
+            img = Image.new('RGB', (1024, 1024))
+            # Create a simple blue-purple gradient
+            for y in range(1024):
+                for x in range(1024):
+                    r = int(255 * (x / 1024.0) * 0.5)
+                    g = int(255 * (y / 1024.0) * 0.3)
+                    b = int(255 * (0.5 + 0.5 * (x + y) / 2048.0))
+                    img.putpixel((x, y), (r, g, b))
             
-            if not image_bytes:
-                return None
+            output_io = io.BytesIO()
+            img.save(output_io, format="PNG")
+            image_bytes = output_io.getvalue()
+            
+        # 2. Composite logo if available
+        if logo_path and os.path.exists(logo_path):
+            try:
+                # Open base image
+                base_img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
                 
-            # 2. Composite logo if available
-            if logo_path and os.path.exists(logo_path):
-                try:
-                    # Open base image
-                    base_img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
-                    
-                    # Open logo
-                    logo_img = Image.open(logo_path).convert("RGBA")
-                    
-                    # Target logo width: 15% of base image
-                    target_width = int(base_img.width * 0.15)
-                    
-                    # Get precise aspect ratio
-                    aspect_ratio = logo_img.height / logo_img.width
-                    target_height = int(target_width * aspect_ratio)
-                    
-                    # Resize with LANCZOS to avoid distortion
-                    logo_img = logo_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
-                    
-                    # Add a subtle drop shadow or padding behind logo?
-                    # Instead, if the logo doesn't have transparency, it looks like a block.
-                    # We will create a small semi-transparent pill/badge to put the logo on, so it looks deliberate.
-                    # But if the logo HAS transparency, the pill might look weird.
-                    # Let's just place it with 30px padding and ensure no distortion.
-                    
-                    padding = 30
-                    position = (base_img.width - target_width - padding, padding)
-                    
-                    # Paste logo using alpha channel as mask
-                    base_img.alpha_composite(logo_img, dest=position)
-                    
-                    # Convert back to RGB for saving as standard image if needed, or save as PNG (which supports alpha)
-                    output_io = io.BytesIO()
-                    base_img.save(output_io, format="PNG")
-                    image_bytes = output_io.getvalue()
-                except Exception as composite_err:
-                    print(f"Failed to overlay logo: {composite_err}")
-            
-            # 3. Save the image to the media folder
-            filename = f"generated_img_{uuid.uuid4().hex[:8]}.png"
-            save_dir = os.path.join(settings.MEDIA_ROOT, 'ai_images')
-            os.makedirs(save_dir, exist_ok=True)
-            
-            filepath = os.path.join(save_dir, filename)
-            with open(filepath, 'wb') as f:
-                f.write(image_bytes)
+                # Open logo
+                logo_img = Image.open(logo_path).convert("RGBA")
                 
-            # 4. Return the URL to access it via Django
-            return f"{settings.MEDIA_URL}ai_images/{filename}"
+                # Target logo width: 15% of base image
+                target_width = int(base_img.width * 0.15)
+                
+                # Get precise aspect ratio
+                aspect_ratio = logo_img.height / logo_img.width
+                target_height = int(target_width * aspect_ratio)
+                
+                # Resize with LANCZOS to avoid distortion
+                logo_img = logo_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+                
+                # Add a subtle drop shadow or padding behind logo?
+                # Instead, if the logo doesn't have transparency, it looks like a block.
+                # We will create a small semi-transparent pill/badge to put the logo on, so it looks deliberate.
+                # But if the logo HAS transparency, the pill might look weird.
+                # Let's just place it with 30px padding and ensure no distortion.
+                
+                padding = 30
+                position = (base_img.width - target_width - padding, padding)
+                
+                # Paste logo using alpha channel as mask
+                base_img.alpha_composite(logo_img, dest=position)
+                
+                # Convert back to RGB for saving as standard image if needed, or save as PNG (which supports alpha)
+                output_io = io.BytesIO()
+                base_img.save(output_io, format="PNG")
+                image_bytes = output_io.getvalue()
+            except Exception as composite_err:
+                print(f"Failed to overlay logo: {composite_err}")
+        
+        # 3. Save the image to the media folder
+        filename = f"generated_img_{uuid.uuid4().hex[:8]}.png"
+        save_dir = os.path.join(settings.MEDIA_ROOT, 'ai_images')
+        os.makedirs(save_dir, exist_ok=True)
+        
+        filepath = os.path.join(save_dir, filename)
+        with open(filepath, 'wb') as f:
+            f.write(image_bytes)
+            
+        # 4. Return the URL to access it via Django
+        return f"{settings.MEDIA_URL}ai_images/{filename}"
     except Exception as e:
         print(f"Image generation failed: {e}")
         
     return None
 
-"""
+
 def generate_content_with_gemini(prompt: str) -> str:
    
     from dotenv import load_dotenv
@@ -170,7 +217,13 @@ def generate_content_with_gemini(prompt: str) -> str:
     payload = {
         "system_instruction": {
             "parts": {
-                "text": "You are a top-tier expert social media manager. Write highly engaging, human-like social media posts."
+                # "text": "You are a top-tier expert social media manager. Write highly engaging, human-like social media posts."
+                "text": (
+                    "You are a top-tier Direct-Response Copywriter and Social Media Operations Director. "
+                    "Write highly engaging, human-like social media posts that convert, drive engagement, and are engineered for social media feeds. "
+                    "Use pattern-interrupt hooks (e.g., 3-second curiosity-gap headlines) and clear transition lines. "
+                    "Maximize save-to-reach potential by delivering high-density value breakdowns."
+                )
             }
         },
         "contents": [{"parts": [{"text": prompt}]}]
@@ -317,10 +370,9 @@ def generate_video_with_gemini(prompt: str) -> str:
                 time.sleep(5)
                 continue
             print(f"Error calling Gemini Video API: {e} - Response: {response.text}")
-            return "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+            return None
         except Exception as e:
             print(f"Error calling Gemini Video API: {e}")
-            return "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+            return None
             
-    return "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
-"""
+    return None
