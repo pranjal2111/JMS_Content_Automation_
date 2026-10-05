@@ -1,5 +1,5 @@
-from rest_framework import serializers
-from .models import User, Business, BrandProfile, BrandAsset, MetaConnection, GeneratedPost, AutoReplyLog, AutoDMLog
+﻿from rest_framework import serializers
+from .models import User, Business, BrandProfile, BrandAsset, MetaConnection, GeneratedPost, AutoReplyLog, AutoDMLog, AdCampaign
 
 class BusinessSerializer(serializers.ModelSerializer):
     class Meta:
@@ -64,3 +64,10 @@ class AutoDMLogSerializer(serializers.ModelSerializer):
         model = AutoDMLog
         fields = ['id', 'platform', 'trigger_type', 'recipient_name', 'recipient_id', 'comment_text', 'dm_text', 'post_id', 'status', 'error_message', 'created_at']
 
+class AdCampaignSerializer(serializers.ModelSerializer):
+    post_topic = serializers.CharField(source='post.topic', read_only=True)
+    post_media_url = serializers.CharField(source='post.media_url', read_only=True)
+    post_content = serializers.CharField(source='post.generated_content', read_only=True)
+    class Meta:
+        model = AdCampaign
+        fields = ['id', 'post', 'post_topic', 'post_media_url', 'post_content', 'meta_campaign_id', 'meta_adset_id', 'meta_ad_id', 'budget', 'created_at', 'campaign_type']

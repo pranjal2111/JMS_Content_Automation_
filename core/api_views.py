@@ -165,9 +165,9 @@ class GeneratePostView(views.APIView):
             "You are an expert social media strategist and world-class copywriter.\n"
             f"Your task is to craft a highly engaging social media post about: '{topic}'.\n\n"
             "=== STRATEGIC DIRECTION ===\n"
-            f"• Content Category: {category}\n"
-            f"• Facebook Objective: {fb_objective}\n"
-            f"• Instagram Objective: {insta_objective}\n"
+            f"Ã¢â‚¬Â¢ Content Category: {category}\n"
+            f"Ã¢â‚¬Â¢ Facebook Objective: {fb_objective}\n"
+            f"Ã¢â‚¬Â¢ Instagram Objective: {insta_objective}\n"
             f"{brand_info}\n\n"
             "=== GENERATION INSTRUCTIONS ===\n"
             "1. Generate EXACTLY 5 completely distinct, high-performing variations of the post.\n"
@@ -221,13 +221,15 @@ class GeneratePostView(views.APIView):
                     return ai_service.generate_image_for_post(
                         opt_text, 
                         brand_name=business.name if business else None, 
-                        logo_path=logo_path
+                        logo_path=logo_path,
+                        website_url=profile.website_url if profile else None
                     )
                 else:
                     return ai_service.generate_image_for_post(
                         opt_text, 
                         brand_name=business.name if business else None, 
-                        logo_path=logo_path
+                        logo_path=logo_path,
+                        website_url=profile.website_url if profile else None
                     )
                 
             media_urls = []
@@ -302,7 +304,7 @@ class PostListView(generics.ListAPIView):
     serializer_class = GeneratedPostSerializer
 
     def get_queryset(self):
-        qs = GeneratedPost.objects.filter(business=self.request.user.business).order_by('-created_at')
+        qs = GeneratedPost.objects.filter(business=self.request.user.business).exclude(status='AD_SCRATCH').order_by('-created_at')
         status_filter = self.request.query_params.get('status')
         if status_filter:
             qs = qs.filter(status=status_filter)
@@ -449,7 +451,7 @@ class DashboardStatsView(views.APIView):
         if not business:
             return Response({"error": "User is not associated with any business."}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            posts_generated = GeneratedPost.objects.filter(business=business).count()
+            posts_generated = GeneratedPost.objects.filter(business=business).exclude(status='AD_SCRATCH').count()
             published_posts = GeneratedPost.objects.filter(business=business, status='PUBLISHED').count()
             scheduled_posts = GeneratedPost.objects.filter(business=business, scheduled_at__isnull=False).exclude(status='PUBLISHED').count()
             
@@ -463,6 +465,36 @@ class DashboardStatsView(views.APIView):
             if connection and connection.access_token:
                 pages_connected = 1 if connection.page_id else 0 
                 
+            # Fetch Recent Activity
+            recent_activity = []
+            
+            latest_posts = GeneratedPost.objects.filter(business=business).exclude(status='AD_SCRATCH').order_by('-created_at')[:5]
+            for p in latest_posts:
+                if p.status == 'PUBLISHED':
+                    title = f"Published Post: {p.topic}"
+                elif p.scheduled_at:
+                    title = f"Scheduled Post: {p.topic}"
+                else:
+                    title = f"Generated Post: {p.topic}"
+                    
+                recent_activity.append({
+                    "id": f"post_{p.id}",
+                    "title": title,
+                    "date": p.created_at,
+                    "type": "POST"
+                })
+                
+            latest_ads = AdCampaign.objects.filter(post__business=business).order_by('-created_at')[:5]
+            for a in latest_ads:
+                recent_activity.append({
+                    "id": f"ad_{a.id}",
+                    "title": f"Launched Ad: {a.post.topic}",
+                    "date": a.created_at,
+                    "type": "AD"
+                })
+                
+            recent_activity = sorted(recent_activity, key=lambda x: x['date'], reverse=True)[:6]
+
             return Response({
                 "posts_generated": posts_generated,
                 "published_posts": published_posts,
@@ -470,7 +502,8 @@ class DashboardStatsView(views.APIView):
                 "auto_replies_sent": auto_replies_sent,
                 "auto_dms_sent": auto_dms_sent,
                 "ad_campaigns_total": ad_campaigns_total,
-                "pages_connected": pages_connected
+                "pages_connected": pages_connected,
+                "recent_activity": recent_activity
             })
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -638,6 +671,7 @@ class CreateAdView(views.APIView):
         genders = request.data.get('genders', []) # empty means all
         countries = request.data.get('countries', ['IN'])
         website_url = request.data.get('website_url', 'https://example.com')
+        campaign_status = request.data.get('status', 'PAUSED')
         call_to_action = request.data.get('call_to_action', 'LEARN_MORE')
         
         # Build targeting object
@@ -651,28 +685,57 @@ class CreateAdView(views.APIView):
 
         try:
             # 1. Create Campaign
-            camp_res = meta_service.create_ad_campaign(connection.ad_account_id, campaign_name, connection.access_token, objective=objective)
+            camp_res = meta_service.create_ad_campaign(connection.ad_account_id, campaign_name, connection.access_token, objective=objective, status=campaign_status)
             if 'error' in camp_res: raise Exception(camp_res['error'])
             camp_id = camp_res['id']
 
             # 2. Create Ad Set
-            adset_res = meta_service.create_ad_set(connection.ad_account_id, connection.access_token, camp_id, f"AdSet: {post.topic}", float(budget), targeting=targeting)
+            adset_res = meta_service.create_ad_set(connection.ad_account_id, connection.access_token, camp_id, f"AdSet: {post.topic}", float(budget), targeting=targeting, status=campaign_status)
             if 'error' in adset_res: raise Exception(adset_res['error'])
             adset_id = adset_res['id']
             
-            # 3. Upload Image
+            # 3. Upload Image or Video
             image_url = post.media_urls[0] if post.media_urls else post.media_url
-            img_res = meta_service.upload_ad_image(connection.ad_account_id, connection.access_token, image_url)
-            if 'error' in img_res: raise Exception(img_res['error'])
-            image_hash = img_res['images']['image.jpg']['hash']
+            if image_url and not image_url.startswith('http'):
+                image_url = request.build_absolute_uri(image_url)
+                
+            image_hash = None
+            video_id = None
+            clean_url = image_url.lower().split('?')[0]
+            if clean_url.endswith(('.mp4', '.mov', '.webm')):
+                vid_res = meta_service.upload_ad_video(connection.ad_account_id, connection.access_token, image_url)
+                if 'error' in vid_res: raise Exception(vid_res['error'])
+                video_id = vid_res['id']
+                # Upload a default thumbnail for video to get image_hash
+                fallback_thumb = "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ac/No_image_available.svg/1024px-No_image_available.svg.png"
+                
+                logo_asset = BrandAsset.objects.filter(business=business, asset_type='LOGO').first()
+                if logo_asset and logo_asset.file:
+                    fallback_thumb = request.build_absolute_uri(logo_asset.file.url)
+                    if '127.0.0.1' in fallback_thumb or 'localhost' in fallback_thumb:
+                        import os
+                        redirect_uri = os.environ.get('META_REDIRECT_URI', '')
+                        if 'devtunnels.ms' in redirect_uri:
+                            from urllib.parse import urlparse
+                            host = urlparse(redirect_uri).netloc
+                            host = host.replace('-5173.', '-8000.')
+                            fallback_thumb = f"https://{host}{logo_asset.file.url}"
+
+                img_res = meta_service.upload_ad_image(connection.ad_account_id, connection.access_token, fallback_thumb)
+                if 'error' not in img_res and 'images' in img_res:
+                    image_hash = img_res['images']['image.jpg']['hash']
+            else:
+                img_res = meta_service.upload_ad_image(connection.ad_account_id, connection.access_token, image_url)
+                if 'error' in img_res: raise Exception(img_res['error'])
+                image_hash = img_res['images']['image.jpg']['hash']
             
             # 4. Create Creative
-            creative_res = meta_service.create_ad_creative(connection.ad_account_id, connection.access_token, connection.page_id, post.generated_content, website_url, image_hash, call_to_action_type=call_to_action)
+            creative_res = meta_service.create_ad_creative(connection.ad_account_id, connection.access_token, connection.page_id, post.generated_content, website_url, image_hash=image_hash, video_id=video_id, call_to_action_type=call_to_action, video_thumbnail_url=fallback_thumb if video_id else None)
             if 'error' in creative_res: raise Exception(creative_res['error'])
             creative_id = creative_res['id']
             
             # 5. Create Ad
-            ad_res = meta_service.create_ad(connection.ad_account_id, connection.access_token, adset_id, creative_id, f"Ad: {post.topic}")
+            ad_res = meta_service.create_ad(connection.ad_account_id, connection.access_token, adset_id, creative_id, f"Ad: {post.topic}", status=campaign_status)
             if 'error' in ad_res: raise Exception(ad_res['error'])
             ad_id = ad_res['id']
 
@@ -900,6 +963,7 @@ class CreateAdScratchView(views.APIView):
         genders = request.data.get('genders', [])
         countries = request.data.get('countries', ['IN'])
         website_url = request.data.get('website_url', 'https://example.com')
+        campaign_status = request.data.get('status', 'PAUSED')
         call_to_action = request.data.get('call_to_action', 'LEARN_MORE')
         
         ad_creative = request.data.get('custom_creative', 'Custom Ad')
@@ -923,31 +987,59 @@ class CreateAdScratchView(views.APIView):
                 topic=campaign_name,
                 generated_content=ad_creative,
                 media_url=ad_image_url,
-                status='PUBLISHED'
+                status='AD_SCRATCH'
             )
 
             # 1. Create Campaign
-            camp_res = meta_service.create_ad_campaign(connection.ad_account_id, campaign_name, connection.access_token, objective=objective)
+            camp_res = meta_service.create_ad_campaign(connection.ad_account_id, campaign_name, connection.access_token, objective=objective, status=campaign_status)
             if 'error' in camp_res: raise Exception(camp_res['error'])
             camp_id = camp_res['id']
 
             # 2. Create Ad Set
-            adset_res = meta_service.create_ad_set(connection.ad_account_id, connection.access_token, camp_id, f"AdSet: {campaign_name}", float(budget), targeting=targeting)
+            adset_res = meta_service.create_ad_set(connection.ad_account_id, connection.access_token, camp_id, f"AdSet: {campaign_name}", float(budget), targeting=targeting, status=campaign_status)
             if 'error' in adset_res: raise Exception(adset_res['error'])
             adset_id = adset_res['id']
             
-            # 3. Upload Image
-            img_res = meta_service.upload_ad_image(connection.ad_account_id, connection.access_token, ad_image_url)
-            if 'error' in img_res: raise Exception(img_res['error'])
-            image_hash = img_res['images']['image.jpg']['hash']
+            # 3. Upload Image or Video
+            if ad_image_url and not ad_image_url.startswith('http'):
+                ad_image_url = request.build_absolute_uri(ad_image_url)
+                
+            image_hash = None
+            video_id = None
+            clean_url = ad_image_url.lower().split('?')[0]
+            if clean_url.endswith(('.mp4', '.mov', '.webm')):
+                vid_res = meta_service.upload_ad_video(connection.ad_account_id, connection.access_token, ad_image_url)
+                if 'error' in vid_res: raise Exception(vid_res['error'])
+                video_id = vid_res['id']
+                # Upload a default thumbnail for video to get image_hash
+                fallback_thumb = "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ac/No_image_available.svg/1024px-No_image_available.svg.png"
+                
+                logo_asset = BrandAsset.objects.filter(business=business, asset_type='LOGO').first()
+                if logo_asset and logo_asset.file:
+                    fallback_thumb = request.build_absolute_uri(logo_asset.file.url)
+                    if '127.0.0.1' in fallback_thumb or 'localhost' in fallback_thumb:
+                        import os
+                        redirect_uri = os.environ.get('META_REDIRECT_URI', '')
+                        if 'devtunnels.ms' in redirect_uri:
+                            from urllib.parse import urlparse
+                            host = urlparse(redirect_uri).netloc
+                            host = host.replace('-5173.', '-8000.')
+                            fallback_thumb = f"https://{host}{logo_asset.file.url}"
+                img_res = meta_service.upload_ad_image(connection.ad_account_id, connection.access_token, fallback_thumb)
+                if 'error' not in img_res and 'images' in img_res:
+                    image_hash = img_res['images']['image.jpg']['hash']
+            else:
+                img_res = meta_service.upload_ad_image(connection.ad_account_id, connection.access_token, ad_image_url)
+                if 'error' in img_res: raise Exception(img_res['error'])
+                image_hash = img_res['images']['image.jpg']['hash']
             
             # 4. Create Creative
-            creative_res = meta_service.create_ad_creative(connection.ad_account_id, connection.access_token, connection.page_id, ad_creative, website_url, image_hash, call_to_action_type=call_to_action)
+            creative_res = meta_service.create_ad_creative(connection.ad_account_id, connection.access_token, connection.page_id, ad_creative, website_url, image_hash=image_hash, video_id=video_id, call_to_action_type=call_to_action, video_thumbnail_url=fallback_thumb if video_id else None)
             if 'error' in creative_res: raise Exception(creative_res['error'])
             creative_id = creative_res['id']
             
             # 5. Create Ad
-            ad_res = meta_service.create_ad(connection.ad_account_id, connection.access_token, adset_id, creative_id, f"Ad: {campaign_name}")
+            ad_res = meta_service.create_ad(connection.ad_account_id, connection.access_token, adset_id, creative_id, f"Ad: {campaign_name}", status=campaign_status)
             if 'error' in ad_res: raise Exception(ad_res['error'])
             ad_id = ad_res['id']
 
@@ -996,3 +1088,13 @@ class MetaPostDetailsView(views.APIView):
             return Response(details, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class AdCampaignListView(generics.ListAPIView):
+    permission_classes = (IsAuthenticated,)
+    from .serializers import AdCampaignSerializer
+    serializer_class = AdCampaignSerializer
+
+    def get_queryset(self):
+        return AdCampaign.objects.filter(post__business=self.request.user.business).order_by('-created_at')
+
+

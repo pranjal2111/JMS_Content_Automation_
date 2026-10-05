@@ -1,4 +1,4 @@
-import os
+﻿import os
 import io
 import base64
 import uuid
@@ -59,7 +59,7 @@ def generate_post_content(prompt: str) -> str:
         # Fallback to standard OpenAI if needed, or raise exception
         raise ValueError("Azure OpenAI configuration is missing or invalid.")
 
-def generate_image_for_post(prompt: str, brand_name: str = None, logo_path: str = None) -> str:
+def generate_image_for_post(prompt: str, brand_name: str = None, logo_path: str = None, website_url: str = None) -> str:
     from dotenv import load_dotenv
     load_dotenv(override=True)
     
@@ -147,44 +147,61 @@ def generate_image_for_post(prompt: str, brand_name: str = None, logo_path: str 
             img.save(output_io, format="PNG")
             image_bytes = output_io.getvalue()
             
-        # 2. Composite logo if available
-        if logo_path and os.path.exists(logo_path):
+        # 2. Add Watermark and Logo
+        try:
+            base_img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+            
+            # Composite logo if available
+            if logo_path and os.path.exists(logo_path):
+                try:
+                    logo_img = Image.open(logo_path).convert("RGBA")
+                    target_width = int(base_img.width * 0.15)
+                    aspect_ratio = logo_img.height / logo_img.width
+                    target_height = int(target_width * aspect_ratio)
+                    logo_img = logo_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+                    
+                    padding = 30
+                    position = (base_img.width - target_width - padding, padding)
+                    base_img.alpha_composite(logo_img, dest=position)
+                except Exception as comp_err:
+                    print(f"Failed to overlay logo: {comp_err}")
+            
+            # Add jmstech.co at the bottom
             try:
-                # Open base image
-                base_img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+                from PIL import ImageDraw, ImageFont
+                draw = ImageDraw.Draw(base_img)
+                if not website_url:
+                    raise Exception("No website URL provided")
+                domain = website_url.replace("https://", "").replace("http://", "").strip("/")
+                if not domain.startswith("www."):
+                    website_text = "www." + domain
+                else:
+                    website_text = domain
+                try:
+                    font = ImageFont.truetype("arialbd.ttf", 38)
+                except:
+                    font = ImageFont.load_default()
+                    
+                bbox = draw.textbbox((0, 0), website_text, font=font)
+                text_w = bbox[2] - bbox[0]
+                text_h = bbox[3] - bbox[1]
                 
-                # Open logo
-                logo_img = Image.open(logo_path).convert("RGBA")
+                text_x = 40
+                text_y = base_img.height - text_h - 40
                 
-                # Target logo width: 15% of base image
-                target_width = int(base_img.width * 0.15)
+                # Draw text with subtle drop shadow for readability
+                shadow_offset = 2
+                draw.text((text_x + shadow_offset, text_y + shadow_offset), website_text, font=font, fill=(0, 0, 0, 180))
+                draw.text((text_x, text_y), website_text, font=font, fill=(255, 255, 255, 255))
+            except Exception as txt_err:
+                print(f"Failed to draw website text: {txt_err}")
                 
-                # Get precise aspect ratio
-                aspect_ratio = logo_img.height / logo_img.width
-                target_height = int(target_width * aspect_ratio)
-                
-                # Resize with LANCZOS to avoid distortion
-                logo_img = logo_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
-                
-                # Add a subtle drop shadow or padding behind logo?
-                # Instead, if the logo doesn't have transparency, it looks like a block.
-                # We will create a small semi-transparent pill/badge to put the logo on, so it looks deliberate.
-                # But if the logo HAS transparency, the pill might look weird.
-                # Let's just place it with 30px padding and ensure no distortion.
-                
-                padding = 30
-                position = (base_img.width - target_width - padding, padding)
-                
-                # Paste logo using alpha channel as mask
-                base_img.alpha_composite(logo_img, dest=position)
-                
-                # Convert back to RGB for saving as standard image if needed, or save as PNG (which supports alpha)
-                output_io = io.BytesIO()
-                base_img.save(output_io, format="PNG")
-                image_bytes = output_io.getvalue()
-            except Exception as composite_err:
-                print(f"Failed to overlay logo: {composite_err}")
-        
+            output_io = io.BytesIO()
+            base_img.save(output_io, format="PNG")
+            image_bytes = output_io.getvalue()
+        except Exception as e:
+            print(f"Image modification failed: {e}")
+            
         # 3. Save the image to the media folder
         filename = f"generated_img_{uuid.uuid4().hex[:8]}.png"
         save_dir = os.path.join(settings.MEDIA_ROOT, 'ai_images')

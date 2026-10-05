@@ -1,4 +1,4 @@
-from django.db import models
+﻿from django.db import models
 from django.contrib.auth.models import AbstractUser
 import uuid
 
@@ -43,7 +43,7 @@ class BrandAsset(models.Model):
     business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name='assets')
     name = models.CharField(max_length=255)
     file = models.FileField(upload_to='brand_assets/')
-    asset_type = models.CharField(max_length=50, choices=[('LOGO', 'Logo'), ('DOCUMENT', 'Document'), ('IMAGE', 'Image')])
+    asset_type = models.CharField(max_length=50, choices=[('LOGO', 'Logo'), ('DOCUMENT', 'Document'), ('IMAGE', 'Image'), ('VIDEO', 'Video')])
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
 # 4. Meta Integrations
@@ -126,10 +126,11 @@ class AutoDMLog(models.Model):
         ordering = ['-created_at']
 
 class AdCampaign(models.Model):
-    post = models.OneToOneField(GeneratedPost, on_delete=models.CASCADE, related_name='ad_campaign')
+    post = models.ForeignKey(GeneratedPost, on_delete=models.CASCADE, related_name='ad_campaigns')
     meta_campaign_id = models.CharField(max_length=255, blank=True, null=True)
     meta_adset_id = models.CharField(max_length=255, blank=True, null=True)
     meta_ad_id = models.CharField(max_length=255, blank=True, null=True)
+    campaign_type = models.CharField(max_length=20, default='BOOST')
     budget = models.DecimalField(max_digits=10, decimal_places=2, default=10.00, help_text="Daily budget in account currency")
     status = models.CharField(max_length=50, default='PENDING')
     created_at = models.DateTimeField(auto_now_add=True)

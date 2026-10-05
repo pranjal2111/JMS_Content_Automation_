@@ -138,9 +138,16 @@ def publish_to_page(page_id, user_access_token, message, image_urls=None):
         image_urls = [image_urls]
 
     if len(image_urls) == 1:
-        # Single image post
-        url = f"{GRAPH_API_URL}/{page_id}/photos"
-        payload = {"url": image_urls[0], "message": message, "access_token": page_access_token}
+        # Check if it's a video
+        is_video = image_urls[0].lower().split('?')[0].endswith(('.mp4', '.mov', '.webm'))
+        
+        if is_video:
+            url = f"{GRAPH_API_URL}/{page_id}/videos"
+            payload = {"file_url": image_urls[0], "description": message, "access_token": page_access_token}
+        else:
+            url = f"{GRAPH_API_URL}/{page_id}/photos"
+            payload = {"url": image_urls[0], "message": message, "access_token": page_access_token}
+            
         response = requests.post(url, data=payload)
         return response.json()
         
@@ -171,15 +178,24 @@ def publish_to_page(page_id, user_access_token, message, image_urls=None):
     return response.json()
 
 def publish_to_instagram(ig_user_id, access_token, image_url, caption):
-    """Publishes a single image post to Instagram."""
+    """Publishes a single image or video post to Instagram."""
     # 1. Create media container
-    media_url = f"{GRAPH_API_URL}/{ig_user_id}/media"
+    media_url_endpoint = f"{GRAPH_API_URL}/{ig_user_id}/media"
+    
+    is_video = image_url.lower().split('?')[0].endswith(('.mp4', '.mov', '.webm'))
+    
     media_payload = {
-        "image_url": image_url,
         "caption": caption,
         "access_token": access_token
     }
-    media_res = requests.post(media_url, data=media_payload).json()
+    
+    if is_video:
+        media_payload["video_url"] = image_url
+        media_payload["media_type"] = "VIDEO"
+    else:
+        media_payload["image_url"] = image_url
+        
+    media_res = requests.post(media_url_endpoint, data=media_payload).json()
     
     if "id" not in media_res:
         return {"error": media_res}
@@ -217,22 +233,25 @@ def send_comment_reply(comment_id, message, access_token, page_id=None, is_insta
     response = requests.post(url, data=payload)
     return response.json()
 
-def create_ad_campaign(ad_account_id, name, access_token, objective="OUTCOME_ENGAGEMENT"):
+def create_ad_campaign(ad_account_id, name, access_token, objective="OUTCOME_ENGAGEMENT", status="PAUSED"):
     """Creates a basic ad campaign."""
-    url = f"{GRAPH_API_URL}/act_{ad_account_id}/campaigns"
+    _clean_id = ad_account_id.replace('act_', '')
+    url = f"{GRAPH_API_URL}/act_{_clean_id}/campaigns"
     payload = {
         "name": name,
         "objective": objective,
-        "status": "PAUSED",
+        "status": status,
         "special_ad_categories": "[]",
+        "is_adset_budget_sharing_enabled": "false",
         "access_token": access_token
     }
     response = requests.post(url, data=payload)
     return response.json()
 
-def create_ad_set(ad_account_id, access_token, campaign_id, name, daily_budget, targeting=None):
+def create_ad_set(ad_account_id, access_token, campaign_id, name, daily_budget, targeting=None, status="PAUSED"):
     """Creates an Ad Set within a campaign."""
-    url = f"{GRAPH_API_URL}/act_{ad_account_id}/adsets"
+    _clean_id = ad_account_id.replace('act_', '')
+    url = f"{GRAPH_API_URL}/act_{_clean_id}/adsets"
     payload = {
         "name": name,
         "campaign_id": campaign_id,
@@ -240,7 +259,7 @@ def create_ad_set(ad_account_id, access_token, campaign_id, name, daily_budget, 
         "billing_event": "IMPRESSIONS",
         "optimization_goal": "REACH",
         "bid_amount": 100,
-        "status": "PAUSED",
+        "status": status,
         "access_token": access_token
     }
     if targeting:
@@ -249,9 +268,24 @@ def create_ad_set(ad_account_id, access_token, campaign_id, name, daily_budget, 
     response = requests.post(url, data=payload)
     return response.json()
 
+def upload_ad_video(ad_account_id, access_token, video_url):
+    "Uploads a video to the ad account and returns its ID."
+    _clean_id = ad_account_id.replace('act_', '')
+    url = f"{GRAPH_API_URL}/act_{_clean_id}/advideos"
+    vid_data = requests.get(video_url).content
+    files = {
+        "source": ("video.mp4", vid_data, "video/mp4")
+    }
+    payload = {
+        "access_token": access_token
+    }
+    response = requests.post(url, data=payload, files=files)
+    return response.json()
+
 def upload_ad_image(ad_account_id, access_token, image_url):
     """Uploads an image to the ad account and returns its hash."""
-    url = f"{GRAPH_API_URL}/act_{ad_account_id}/adimages"
+    _clean_id = ad_account_id.replace('act_', '')
+    url = f"{GRAPH_API_URL}/act_{_clean_id}/adimages"
     # Download image first
     img_data = requests.get(image_url).content
     files = {
@@ -263,9 +297,10 @@ def upload_ad_image(ad_account_id, access_token, image_url):
     response = requests.post(url, data=payload, files=files)
     return response.json()
 
-def create_ad_creative(ad_account_id, access_token, page_id, message, link, image_hash, call_to_action_type="LEARN_MORE"):
+def create_ad_creative(ad_account_id, access_token, page_id, message, link, image_hash=None, video_id=None, call_to_action_type="LEARN_MORE", video_thumbnail_url=None):
     """Creates an Ad Creative linked to a Facebook Page."""
-    url = f"{GRAPH_API_URL}/act_{ad_account_id}/adcreatives"
+    _clean_id = ad_account_id.replace('act_', '')
+    url = f"{GRAPH_API_URL}/act_{_clean_id}/adcreatives"
     
     call_to_action = {
         "type": call_to_action_type,
@@ -274,30 +309,47 @@ def create_ad_creative(ad_account_id, access_token, page_id, message, link, imag
         }
     }
     
+    story_spec = {
+        "page_id": page_id,
+    }
+    
+    if video_id:
+        video_data_spec = {
+            "video_id": video_id,
+            "call_to_action": call_to_action,
+            "message": message
+        }
+        if image_hash:
+            video_data_spec["image_hash"] = image_hash
+        elif video_thumbnail_url:
+            video_data_spec["image_url"] = video_thumbnail_url
+
+        story_spec["video_data"] = video_data_spec
+    elif image_hash:
+        story_spec["link_data"] = {
+            "image_hash": image_hash,
+            "link": link,
+            "message": message,
+            "call_to_action": call_to_action
+        }
+        
     payload = {
         "name": f"Creative for {page_id}",
-        "object_story_spec": json.dumps({
-            "page_id": page_id,
-            "link_data": {
-                "image_hash": image_hash,
-                "link": link,
-                "message": message,
-                "call_to_action": call_to_action
-            }
-        }),
+        "object_story_spec": json.dumps(story_spec),
         "access_token": access_token
     }
     response = requests.post(url, data=payload)
     return response.json()
 
-def create_ad(ad_account_id, access_token, adset_id, creative_id, name):
+def create_ad(ad_account_id, access_token, adset_id, creative_id, name, status="PAUSED"):
     """Creates the final Ad."""
-    url = f"{GRAPH_API_URL}/act_{ad_account_id}/ads"
+    _clean_id = ad_account_id.replace('act_', '')
+    url = f"{GRAPH_API_URL}/act_{_clean_id}/ads"
     payload = {
         "name": name,
         "adset_id": adset_id,
         "creative": json.dumps({"creative_id": creative_id}),
-        "status": "PAUSED",
+        "status": status,
         "access_token": access_token
     }
     response = requests.post(url, data=payload)
@@ -412,4 +464,5 @@ def fetch_post_details(post_id, access_token, platform="instagram"):
     
     response = requests.get(url, params=params)
     return response.json()
+
 

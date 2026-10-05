@@ -42,7 +42,7 @@ urlpatterns = [
     # Auto DM Logs
     path('api/auto-dm-logs/', api_views.AutoDMLogListView.as_view(), name='api_auto_dm_logs'),
     
-    # Ad Campaign creation
     path('api/posts/<int:pk>/create-ad/', api_views.CreateAdView.as_view(), name='api_create_ad'),
     path('api/ads/create-scratch/', api_views.CreateAdScratchView.as_view(), name='api_create_ad_scratch'),
+    path('api/ads/history/', api_views.AdCampaignListView.as_view(), name='api_ad_campaign_history'),
 ]
