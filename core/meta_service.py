@@ -355,11 +355,34 @@ def create_ad(ad_account_id, access_token, adset_id, creative_id, name, status="
     response = requests.post(url, data=payload)
     return response.json()
 
-def get_ad_insights(ad_id, access_token):
+def get_ad_insights(ad_id, access_token, time_increment=None):
     """Pulls insights (spend, impressions, clicks, etc.) for a specific Ad."""
     url = f"{GRAPH_API_URL}/{ad_id}/insights"
     params = {
-        "fields": "spend,impressions,clicks,cpc,ctr",
+        "fields": "spend,impressions,clicks,cpc,ctr,reach,frequency,cpm,cpp,objective,inline_link_clicks,inline_post_engagement,cost_per_inline_link_click,cost_per_inline_post_engagement,actions,action_values,cost_per_action_type,conversion_rate_ranking,engagement_rate_ranking,quality_ranking",
+        "access_token": access_token
+    }
+    if time_increment:
+        params["time_increment"] = time_increment
+        
+    response = requests.get(url, params=params)
+    return response.json()
+
+def get_ad_details(ad_id, access_token):
+    """Pulls status and effective_status for a specific Ad."""
+    url = f"{GRAPH_API_URL}/{ad_id}"
+    params = {
+        "fields": "status,effective_status,updated_time",
+        "access_token": access_token
+    }
+    response = requests.get(url, params=params)
+    return response.json()
+
+def get_adset_details(adset_id, access_token):
+    """Pulls budget, schedule, bid strategy, and attribution for an Ad Set."""
+    url = f"{GRAPH_API_URL}/{adset_id}"
+    params = {
+        "fields": "name,daily_budget,lifetime_budget,start_time,end_time,bid_strategy,attribution_spec",
         "access_token": access_token
     }
     response = requests.get(url, params=params)

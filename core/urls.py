@@ -45,4 +45,5 @@ urlpatterns = [
     path('api/posts/<int:pk>/create-ad/', api_views.CreateAdView.as_view(), name='api_create_ad'),
     path('api/ads/create-scratch/', api_views.CreateAdScratchView.as_view(), name='api_create_ad_scratch'),
     path('api/ads/history/', api_views.AdCampaignListView.as_view(), name='api_ad_campaign_history'),
+    path('api/ads/<int:pk>/insights/', api_views.AdCampaignInsightView.as_view(), name='api_ad_campaign_insights'),
 ]

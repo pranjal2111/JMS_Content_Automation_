@@ -1097,4 +1097,50 @@ class AdCampaignListView(generics.ListAPIView):
     def get_queryset(self):
         return AdCampaign.objects.filter(post__business=self.request.user.business).order_by('-created_at')
 
+class AdCampaignInsightView(views.APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, pk):
+        try:
+            campaign = AdCampaign.objects.get(pk=pk, post__business=request.user.business)
+            connection = MetaConnection.objects.filter(business=request.user.business, is_active=True).first()
+            
+            if not connection or not connection.access_token:
+                return Response({"error": "Meta account not connected"}, status=status.HTTP_400_BAD_REQUEST)
+                
+            if not campaign.meta_ad_id:
+                return Response({"error": "No Meta Ad ID found for this campaign"}, status=status.HTTP_400_BAD_REQUEST)
+                
+            from . import meta_service
+            # 1. Get Status
+            details = meta_service.get_ad_details(campaign.meta_ad_id, connection.access_token)
+            if 'effective_status' in details:
+                campaign.status = details['effective_status']
+                campaign.save()
+                
+            # 2. Get Insights
+            insights_res = meta_service.get_ad_insights(campaign.meta_ad_id, connection.access_token)
+            
+            insights_data = {}
+            if 'data' in insights_res and len(insights_res['data']) > 0:
+                insights_data = insights_res['data'][0]
+                
+            # 3. Get Daily Insights (for charts)
+            daily_res = meta_service.get_ad_insights(campaign.meta_ad_id, connection.access_token, time_increment="1")
+            if 'data' in daily_res:
+                insights_data['daily_data'] = daily_res['data']
+            else:
+                insights_data['daily_data'] = []
+                
+            return Response({
+                "status": campaign.status,
+                "insights": insights_data,
+                "raw_details": details
+            })
+            
+        except AdCampaign.DoesNotExist:
+            return Response({"error": "Ad Campaign not found"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
